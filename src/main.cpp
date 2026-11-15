@@ -10,12 +10,11 @@ constexpr int applyDimensions = 108;																					// Задаёт иде�
 constexpr int coolingButton = 110;																						// Задаёт кнопку переключения расчётного графика
 constexpr int timeSlider = 111;																							// Задаёт идентификатор ползунка времени
 constexpr int timeLabel = 112;																							// Задаёт подпись выбора расчётного кадра
+constexpr int sectionPicker = 113;																						// Задаёт идентификатор выбора отделения
+constexpr int sectionLabel = 114;																						// Задаёт подпись списка отделений
 constexpr int statusText = 109;																							// Задаёт идентификатор строки проверки
 constexpr int panelWidth = 256;																							// Задаёт ширину панели ввода
 constexpr int split = 284;																								// Отделяет панель ввода от разреза
-constexpr const wchar_t* sectionNames[]{																				// Перечисляет отделения в порядке модели
-    L"Нижняя шейка", L"Бочка", L"Верхняя шейка", L"Прибыль"																// Задаёт названия строк панели ввода
-};																														// Завершает список названий
 struct AppState {																										// Хранит состояние текущего окна
     MoldDimensions dimensions = demoDimensions;																			// Начинает с условных демонстрационных размеров
     MoldHitMap hits;																									// Хранит экранные области деталей формы
@@ -24,9 +23,9 @@ struct AppState {																										// Хранит состояние т
     bool trackingMouse = false;																							// Отслеживает выход курсора из окна
     bool dimensionsAccepted = false;																					// Отмечает успешное применение размеров
     bool showCooling = false;																							// Начинает с отображения формы
-    int coolingDiameter = 0;																							// Запоминает диаметр последнего расчёта
+    std::size_t selection = 0;																							// Выбирает сводку формы или одно отделение
     std::size_t frame = 0;																								// Хранит индекс выбранного расчётного состояния
-    CoolingResult cooling{};																							// Хранит рассчитанные кривые охлаждения
+    MoldCooling cooling;																								// Хранит четыре температурные истории
 };																														// Завершает описание состояния окна
 HWND control(HWND window, const wchar_t* type, const wchar_t* text,														// Описывает тип, текст и родителя элемента
              DWORD style, int x, int y, int width, int height, int id = 0) {											// Принимает размер, положение и идентификатор
@@ -59,14 +58,25 @@ void createControls(HWND window) {																						// Создаёт пан
     }																													// Завершает заполнение строк
     control(window, L"BUTTON", L"Применить", BS_PUSHBUTTON | WS_TABSTOP,												// Добавляет кнопку принятия введённых размеров
         28, 279, 113, 30, applyDimensions);																				// Назначает кнопке положение и идентификатор
-    control(window, L"BUTTON", L"Охлаждение бочки", BS_PUSHBUTTON | WS_TABSTOP,											// Добавляет переход к температурному графику
+    control(window, L"BUTTON", L"Охлаждение формы", BS_PUSHBUTTON | WS_TABSTOP,											// Добавляет переход к температурному графику
         28, 338, 157, 30, coolingButton);																				// Назначает положение и идентификатор кнопки
     const HWND slider = control(window, TRACKBAR_CLASSW, L"", TBS_NOTICKS | WS_TABSTOP,									// Создаёт ползунок для расчётных кадров
-        24, 407, 218, 31, timeSlider);																					// Размещает ползунок под кнопками
+        24, 398, 218, 29, timeSlider);																					// Размещает ползунок под кнопками
     const HWND caption = control(window, L"STATIC", L"Момент расчёта", 0,												// Создаёт подпись выбора времени
-        28, 390, 190, 18, timeLabel);																					// Размещает подпись над ползунком
+        28, 380, 190, 18, timeLabel);																					// Размещает подпись над ползунком
     ShowWindow(slider, SW_HIDE);																						// Скрывает выбор времени на видовом чертеже
     ShowWindow(caption, SW_HIDE);																						// Скрывает подпись времени на видовом чертеже
+    const HWND picker = control(window, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,					// Создаёт список расчётных отделений
+        28, 448, 221, 146, sectionPicker);																				// Размещает список под ползунком
+    SendMessageW(picker, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Вся форма"));										// Добавляет общий вид всех отделений
+    for (const wchar_t* section : sectionNames) {																		// Перечисляет отделения формы снизу вверх
+        SendMessageW(picker, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(section));										// Добавляет выбор графика отделения
+    }																													// Завершает заполнение списка
+    SendMessageW(picker, CB_SETCURSEL, 0, 0);																			// Выбирает сводку при первом открытии
+    const HWND pickerCaption = control(window, L"STATIC", L"Отделение", 0,												// Добавляет название списка отделений
+        28, 430, 190, 18, sectionLabel);																				// Размещает подпись над списком
+    ShowWindow(picker, SW_HIDE);																						// Скрывает список в режиме просмотра формы
+    ShowWindow(pickerCaption, SW_HIDE);																					// Скрывает подпись списка на разрезе
 }																														// Завершает построение панели
 int readDimension(HWND window, int id) {																				// Читает один размер из поля ввода
     wchar_t text[6]{};																									// Принимает четыре цифры и конец строки
@@ -84,24 +94,24 @@ int readDimension(HWND window, int id) {																				// Читает од
     }																													// Завершает чтение числа
     return value;																										// Возвращает размер в миллиметрах
 }																														// Завершает чтение одного поля
-void refreshCooling(HWND window, AppState& state) {																		// Пересчитывает график при изменении диаметра бочки
-    const int diameter = state.dimensions[1].diameter;																	// Получает применённый диаметр бочки
-    if (state.coolingDiameter != diameter) {																			// Проверяет соответствие ранее рассчитанных температур
-        try {																											// Запускает расчёт с обработкой ошибок сходимости
-            state.cooling = demonstrationCooling(diameter, demoPhase);													// Учитывает скрытую теплоту в учебной бочке
-        } catch (const std::exception&) {																				// Получает ошибку численного расчёта
-            state.cooling = {};																							// Сбрасывает историю предыдущего диаметра при ошибке
-        }																												// Завершает обработку результата расчёта
-        state.frame = 0;																								// Возвращает выбор к началу охлаждения
-        const auto slider = GetDlgItem(window, timeSlider);																// Получает системный ползунок истории
-        const auto last = state.cooling.samples.empty() ? 0 : state.cooling.samples.size() - 1;							// Определяет число доступных отсчётов
-        SendMessageW(slider, TBM_SETRANGEMAX, TRUE, static_cast<LPARAM>(last));											// Ограничивает ползунок рассчитанными кадрами
-        SendMessageW(slider, TBM_SETPOS, TRUE, 0);																		// Выбирает начальный отсчёт времени
-        SendMessageW(slider, TBM_SETPAGESIZE, 0, 120);																	// Задаёт шаг клавиш страниц в кадрах
-        EnableWindow(slider, last != 0);																				// Включает выбор времени при успешном расчёте
-        state.coolingDiameter = diameter;																				// Запоминает диаметр показанных кривых
-    }																													// Завершает проверку необходимости перерасчёта
-}																														// Завершает подготовку графика
+void refreshCooling(HWND window, AppState& state) {																		// Обновляет расчёт изменённых отделений
+    try {																												// Обрабатывает ошибку сходимости расчётной модели
+        if (!state.cooling.refresh(state.dimensions)) {																	// Проверяет изменение диаметров с прошлого расчёта
+            return;																										// Сохраняет кадр при изменении только высот
+        }																												// Завершает проверку необходимости пересчёта
+    } catch (const std::exception&) {																					// Получает ошибку расчёта одного из отделений
+        state.cooling = {};																								// Очищает результаты для недопустимого набора размеров
+    }																													// Завершает обновление расчётной истории
+    state.frame = 0;																									// Возвращает выбор к началу охлаждения
+    const auto slider = GetDlgItem(window, timeSlider);																	// Получает системный ползунок истории
+    const auto count = state.cooling.sampleCount();																		// Определяет общий размер рассчитанной истории
+    const auto last = count == 0 ? 0 : count - 1;																		// Вычисляет последний доступный индекс кадра
+    SendMessageW(slider, TBM_SETRANGEMAX, TRUE, static_cast<LPARAM>(last));												// Ограничивает ползунок рассчитанными кадрами
+    SendMessageW(slider, TBM_SETPOS, TRUE, 0);																			// Выбирает начальный отсчёт времени
+    SendMessageW(slider, TBM_SETPAGESIZE, 0, 120);																		// Задаёт шаг клавиш страниц в кадрах
+    EnableWindow(slider, last != 0);																					// Включает выбор времени при успешном расчёте
+    EnableWindow(GetDlgItem(window, sectionPicker), last != 0);															// Разрешает сравнение рассчитанных отделений
+}																														// Завершает обновление расчёта и ползунка
 void redrawView(HWND window) {																							// Запрашивает перерисовку правой панели и заголовка
     RECT view{};																										// Подготавливает прямоугольник клиентской области
     GetClientRect(window, &view);																						// Измеряет текущую область приложения
@@ -125,7 +135,7 @@ void applyControls(HWND window, AppState& state) {																		// Прим�
     state.hovered = MoldPart::none;																						// Снимает подсветку при изменении геометрии
     state.hits.clear();																									// Удаляет старые области деталей формы
     if (state.showCooling) {																							// Проверяет видимость температурного графика
-        refreshCooling(window, state);																					// Обновляет график для нового диаметра бочки
+        refreshCooling(window, state);																					// Обновляет результаты изменённых отделений
     }																													// Завершает проверку текущего вида
     redrawView(window);																									// Отображает новую геометрию или температуры
 }																														// Завершает применение параметров
@@ -141,10 +151,18 @@ void drawContent(HDC device, const RECT& client, AppState& state) {													
     SetTextColor(device, GetSysColor(COLOR_WINDOWTEXT));																// Использует системный цвет текста
     constexpr wchar_t panelHeading[] = L"Размеры отделений, мм";														// Задаёт заголовок над рамкой панели
     TextOutW(device, 16, 25, panelHeading, static_cast<int>(std::size(panelHeading)) - 1);								// Выводит название панели размеров
-    const wchar_t* heading = state.showCooling ? L"Охлаждение бочки" : L"Форма в сборе для заливки валка";				// Выбирает заголовок текущего вида
+    const wchar_t* heading = state.selection == 0 ? L"Охлаждение формы" : sectionNames[state.selection - 1];			// Выбирает название расчётной панели
+    if (!state.showCooling) {																							// Проверяет отображение чертежа формы
+        heading = L"Форма в сборе для заливки валка";																	// Подписывает чертёж формы вместо результатов
+    }																													// Завершает выбор заголовка панели
     TextOutW(device, split, 25, heading, static_cast<int>(std::wcslen(heading)));										// Выводит заголовок над правой рамкой
     if (state.showCooling) {																							// Проверяет какой вид открыт справа
-        drawCooling(device, area, state.cooling, state.dimensions[1], state.frame);										// Строит кривые и таблицу выбранного кадра
+        if (state.selection == 0) {																						// Проверяет выбор общего вида формы
+            drawMoldOverview(device, area, state.cooling, state.dimensions, state.frame);								// Показывает сводку всех отделений
+        } else {																										// Обрабатывает выбор отдельного цилиндра
+            const auto section = state.selection - 1;																	// Переходит от списка к номеру отделения
+            drawCooling(device, area, state.cooling.section(section), state.dimensions[section], state.frame);			// Строит кривые и таблицу отделения
+        }																												// Завершает выбор расчётного вида
     } else {																											// Обрабатывает основной вид формы
         drawMold(device, area, state.dimensions, state.hits, state.hovered, state.cursor);								// Рисует форму и подсказку
     }																													// Завершает выбор содержимого панели
@@ -202,10 +220,20 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
                 const int mode = state->showCooling ? SW_SHOW : SW_HIDE;												// Выбирает видимость ползунка расчётной истории
                 ShowWindow(GetDlgItem(window, timeSlider), mode);														// Обновляет видимость системного ползунка
                 ShowWindow(GetDlgItem(window, timeLabel), mode);														// Обновляет видимость подписи времени
-                SetDlgItemTextW(window, coolingButton, state->showCooling ? L"Показать форму" : L"Охлаждение бочки");	// Обновляет подпись переключателя
+                ShowWindow(GetDlgItem(window, sectionPicker), mode);													// Обновляет видимость списка отделений
+                ShowWindow(GetDlgItem(window, sectionLabel), mode);														// Обновляет видимость подписи списка
+                SetDlgItemTextW(window, coolingButton, state->showCooling ? L"Показать форму" : L"Охлаждение формы");	// Обновляет подпись переключателя
                 redrawView(window);																						// Отображает выбранный вид
                 return 0;																								// Завершает обработку кнопки
             }																											// Завершает обработку переключения вида
+            if (LOWORD(wParam) == sectionPicker && HIWORD(wParam) == CBN_SELCHANGE) {									// Обрабатывает выбор расчётного отделения
+                const auto raw = SendMessageW(reinterpret_cast<HWND>(lParam), CB_GETCURSEL, 0, 0);						// Получает выбранную строку списка
+                if (raw >= 0 && raw <= static_cast<LRESULT>(demoDimensions.size())) {									// Проверяет индекс сводки или отделения
+                    state->selection = static_cast<std::size_t>(raw);													// Сохраняет выбор без изменения времени
+                    redrawView(window);																					// Обновляет результат на текущем кадре
+                }																										// Завершает проверку выбора отделения
+                return 0;																								// Подтверждает обработку выбора
+            }																											// Завершает обработку смены расчётного вида
             break;																										// Передаёт остальные команды Windows
         case WM_HSCROLL: {																								// Получает изменение положения ползунка времени
             const HWND slider = GetDlgItem(window, timeSlider);															// Находит ползунок расчётной истории

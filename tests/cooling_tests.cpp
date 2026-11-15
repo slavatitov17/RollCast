@@ -1,4 +1,4 @@
-#include "cooling.h"																												// Подключает расчёт охлаждения для контрольных примеров
+#include "mold_cooling.h"																											// Подключает расчёт охлаждения для контрольных примеров
 #include <cmath>																													// Предоставляет функции Бесселя и экспоненту
 #include <iostream>																													// Выводит результаты численной проверки
 #include <stdexcept>																												// Сообщает о нарушении условий теста
@@ -86,6 +86,43 @@ void checkSolidification() {																										// Проверяет уч
     std::cout << "Demo solidification, hours and energy error: " << *result.completedAt / 3600 << ' '								// Выводит время и невязку учебного примера
               << result.relativeEnergyError << '\n';																				// Завершает строку численной проверки
 }																																	// Завершает проверку энтальпийной схемы
+void checkMoldCooling() {																											// Проверяет общую шкалу и объёмы четырёх цилиндров
+    MoldCooling cooling;																											// Создаёт пустой набор расчётов формы
+    auto dimensions = demoDimensions;																								// Загружает демонстрационную геометрию формы
+    require(cooling.refresh(dimensions) && cooling.sampleCount() == 4321, "Missing mold history");									// Проверяет общий размер истории
+    double volume = 0;																												// Начинает суммирование полного объёма формы
+    double latest = 0;																												// Запоминает самое позднее затвердевание
+    constexpr std::size_t middle = 1200;																							// Выбирает момент через десять часов
+    for (std::size_t i = 0; i < dimensions.size(); ++i) {																			// Сверяет каждое отделение на общей шкале
+        const auto& history = cooling.section(i);																					// Получает историю текущего отделения
+        require(history.samples.size() == cooling.sampleCount() && history.samples[middle].seconds == 36000,						// Сверяет длину и время истории
+            "Inconsistent mold clock");																								// Сообщает о расхождении временных отсчётов
+        require(history.completedAt.has_value(), "Missing section completion");														// Проверяет достижение солидуса в демонстрационном отделении
+        if (*history.completedAt > latest) {																						// Сравнивает окончание с текущим максимумом
+            latest = *history.completedAt;																							// Запоминает наиболее позднее затвердевание
+        }																															// Завершает поиск самого позднего отделения
+        volume += cylinderVolume(dimensions[i]);																					// Прибавляет полный геометрический объём отделения
+    }																																// Завершает проверку всех расчётных историй
+    require(cooling.completedAt() == latest && cooling.section(1).completedAt == latest, "Incorrect mold completion");				// Проверяет окончание по последнему отделению
+    const auto initial = cooling.totalVolumes(dimensions, 0);																		// Проверяет общий исходный жидкий объём
+    const auto intermediate = cooling.totalVolumes(dimensions, middle);																// Проверяет смесь в промежуточном кадре
+    const auto final = cooling.totalVolumes(dimensions, cooling.sampleCount() - 1);													// Проверяет общий конечный твёрдый объём
+    require(std::abs(initial.liquid - volume) < 1e-10 && initial.solid < 1e-10, "Invalid initial mold volume");						// Сверяет полностью жидкую форму
+    require(std::abs(intermediate.solid + intermediate.liquid - volume) < 1e-10, "Intermediate volume mismatch");					// Сверяет сумму двух фаз
+    require(std::abs(final.solid - volume) < 1e-10 && final.liquid < 1e-10, "Invalid final mold volume");							// Сверяет полностью затвердевшую форму
+    const auto* lower = cooling.section(0).samples.data();																			// Запоминает сохранённую историю нижней шейки
+    const auto* barrel = cooling.section(1).samples.data();																			// Запоминает сохранённую историю бочки
+    const auto upperBefore = phaseVolumes(dimensions[2], cooling.section(2).samples[middle]);										// Запоминает объёмы верхней шейки
+    dimensions[2].height *= 2;																										// Удваивает только высоту верхней шейки
+    require(!cooling.refresh(dimensions) && cooling.section(1).samples.data() == barrel, "Height recalculated history");			// Проверяет сохранение температурной истории
+    const auto upperAfter = phaseVolumes(dimensions[2], cooling.section(2).samples[middle]);										// Вычисляет объёмы увеличенной шейки
+    require(std::abs(upperAfter.solid - 2 * upperBefore.solid) < 1e-10 &&															// Проверяет увеличение твёрдого объёма
+        std::abs(upperAfter.liquid - 2 * upperBefore.liquid) < 1e-10, "Height did not scale phase volumes");						// Проверяет увеличение жидкого объёма
+    dimensions[1].diameter = 9999;																									// Задаёт бочку с затвердеванием позже горизонта
+    require(cooling.refresh(dimensions) && cooling.section(0).samples.data() == lower, "Unchanged history was replaced");			// Проверяет выборочный пересчёт
+    require(!cooling.section(1).completedAt && !cooling.completedAt(), "Mold completion outside the horizon");						// Проверяет недостигнутое общее затвердевание
+    std::cout << "Mold volume and completion seconds: " << volume << ' ' << latest << '\n';											// Выводит объём и время учебной формы
+}																																	// Завершает контроль четырёх отделений формы
 }																																	// Завершает область контрольных примеров
 int main() {																														// Запускает контрольные примеры расчётного модуля
     try {																															// Перехватывает ошибки контрольных проверок
@@ -94,6 +131,7 @@ int main() {																														// Запускает контроль
         checkInsulation();																											// Проверяет равновесие и тепловой баланс
         checkPhaseVolumes();																										// Проверяет геометрию фазовых зон отдельно
         checkSolidification();																										// Проверяет затвердевание бочки со скрытой теплотой
+        checkMoldCooling();																											// Проверяет расчёт и синхронизацию всех отделений
     } catch (const std::exception& error) {																							// Получает причину ошибки проверки
         std::cerr << error.what() << '\n';																							// Выводит причину отказа в CTest
         return 1;																													// Сообщает о неудачной проверке
