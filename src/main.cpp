@@ -1,4 +1,6 @@
 #include "cooling_view.h"																								// Подключает разрез и график охлаждения
+#include <commctrl.h>																									// Предоставляет системный ползунок времени
+#include <exception>																									// Позволяет обработать ошибки расчёта фазы
 #include <windowsx.h>																									// Извлекает координаты указателя из оконного сообщения
 #include <cwchar>																										// Предоставляет безопасный разбор целых размеров
 namespace {																												// Ограничивает видимость имён этим файлом
@@ -6,6 +8,8 @@ constexpr wchar_t windowClassName[] = L"RollCastMainWindow";															// У
 constexpr int firstDimension = 100;																						// Задаёт начальный идентификатор полей размеров
 constexpr int applyDimensions = 108;																					// Задаёт идентификатор кнопки применения размеров
 constexpr int coolingButton = 110;																						// Задаёт кнопку переключения расчётного графика
+constexpr int timeSlider = 111;																							// Задаёт идентификатор ползунка времени
+constexpr int timeLabel = 112;																							// Задаёт подпись выбора расчётного кадра
 constexpr int statusText = 109;																							// Задаёт идентификатор строки проверки
 constexpr int panelWidth = 256;																							// Задаёт ширину панели ввода
 constexpr int split = 284;																								// Отделяет панель ввода от разреза
@@ -21,6 +25,7 @@ struct AppState {																										// Хранит состояние т
     bool dimensionsAccepted = false;																					// Отмечает успешное применение размеров
     bool showCooling = false;																							// Начинает с отображения формы
     int coolingDiameter = 0;																							// Запоминает диаметр последнего расчёта
+    std::size_t frame = 0;																								// Хранит индекс выбранного расчётного состояния
     CoolingResult cooling{};																							// Хранит рассчитанные кривые охлаждения
 };																														// Завершает описание состояния окна
 HWND control(HWND window, const wchar_t* type, const wchar_t* text,														// Описывает тип, текст и родителя элемента
@@ -56,6 +61,12 @@ void createControls(HWND window) {																						// Создаёт пан
         28, 279, 113, 30, applyDimensions);																				// Назначает кнопке положение и идентификатор
     control(window, L"BUTTON", L"Охлаждение бочки", BS_PUSHBUTTON | WS_TABSTOP,											// Добавляет переход к температурному графику
         28, 338, 157, 30, coolingButton);																				// Назначает положение и идентификатор кнопки
+    const HWND slider = control(window, TRACKBAR_CLASSW, L"", TBS_NOTICKS | WS_TABSTOP,									// Создаёт ползунок для расчётных кадров
+        24, 407, 218, 31, timeSlider);																					// Размещает ползунок под кнопками
+    const HWND caption = control(window, L"STATIC", L"Момент расчёта", 0,												// Создаёт подпись выбора времени
+        28, 390, 190, 18, timeLabel);																					// Размещает подпись над ползунком
+    ShowWindow(slider, SW_HIDE);																						// Скрывает выбор времени на видовом чертеже
+    ShowWindow(caption, SW_HIDE);																						// Скрывает подпись времени на видовом чертеже
 }																														// Завершает построение панели
 int readDimension(HWND window, int id) {																				// Читает один размер из поля ввода
     wchar_t text[6]{};																									// Принимает четыре цифры и конец строки
@@ -73,10 +84,21 @@ int readDimension(HWND window, int id) {																				// Читает од
     }																													// Завершает чтение числа
     return value;																										// Возвращает размер в миллиметрах
 }																														// Завершает чтение одного поля
-void refreshCooling(AppState& state) {																					// Пересчитывает график при изменении диаметра бочки
+void refreshCooling(HWND window, AppState& state) {																		// Пересчитывает график при изменении диаметра бочки
     const int diameter = state.dimensions[1].diameter;																	// Получает применённый диаметр бочки
     if (state.coolingDiameter != diameter) {																			// Проверяет соответствие ранее рассчитанных температур
-        state.cooling = demonstrationCooling(diameter);																	// Запускает радиальный расчёт охлаждения бочки
+        try {																											// Запускает расчёт с обработкой ошибок сходимости
+            state.cooling = demonstrationCooling(diameter, demoPhase);													// Учитывает скрытую теплоту в учебной бочке
+        } catch (const std::exception&) {																				// Получает ошибку численного расчёта
+            state.cooling = {};																							// Сбрасывает историю предыдущего диаметра при ошибке
+        }																												// Завершает обработку результата расчёта
+        state.frame = 0;																								// Возвращает выбор к началу охлаждения
+        const auto slider = GetDlgItem(window, timeSlider);																// Получает системный ползунок истории
+        const auto last = state.cooling.samples.empty() ? 0 : state.cooling.samples.size() - 1;							// Определяет число доступных отсчётов
+        SendMessageW(slider, TBM_SETRANGEMAX, TRUE, static_cast<LPARAM>(last));											// Ограничивает ползунок рассчитанными кадрами
+        SendMessageW(slider, TBM_SETPOS, TRUE, 0);																		// Выбирает начальный отсчёт времени
+        SendMessageW(slider, TBM_SETPAGESIZE, 0, 120);																	// Задаёт шаг клавиш страниц в кадрах
+        EnableWindow(slider, last != 0);																				// Включает выбор времени при успешном расчёте
         state.coolingDiameter = diameter;																				// Запоминает диаметр показанных кривых
     }																													// Завершает проверку необходимости перерасчёта
 }																														// Завершает подготовку графика
@@ -103,7 +125,7 @@ void applyControls(HWND window, AppState& state) {																		// Прим�
     state.hovered = MoldPart::none;																						// Снимает подсветку при изменении геометрии
     state.hits.clear();																									// Удаляет старые области деталей формы
     if (state.showCooling) {																							// Проверяет видимость температурного графика
-        refreshCooling(state);																							// Обновляет график для нового диаметра бочки
+        refreshCooling(window, state);																					// Обновляет график для нового диаметра бочки
     }																													// Завершает проверку текущего вида
     redrawView(window);																									// Отображает новую геометрию или температуры
 }																														// Завершает применение параметров
@@ -122,7 +144,7 @@ void drawContent(HDC device, const RECT& client, AppState& state) {													
     const wchar_t* heading = state.showCooling ? L"Охлаждение бочки" : L"Форма в сборе для заливки валка";				// Выбирает заголовок текущего вида
     TextOutW(device, split, 25, heading, static_cast<int>(std::wcslen(heading)));										// Выводит заголовок над правой рамкой
     if (state.showCooling) {																							// Проверяет какой вид открыт справа
-        drawCooling(device, area, state.cooling, state.coolingDiameter);												// Строит две температурные кривые
+        drawCooling(device, area, state.cooling, state.dimensions[1], state.frame);										// Строит кривые и таблицу выбранного кадра
     } else {																											// Обрабатывает основной вид формы
         drawMold(device, area, state.dimensions, state.hits, state.hovered, state.cursor);								// Рисует форму и подсказку
     }																													// Завершает выбор содержимого панели
@@ -175,13 +197,25 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
                 state->hits.clear();																					// Удаляет карту предыдущего вида
                 state->hovered = MoldPart::none;																		// Сбрасывает выделение деталей формы
                 if (state->showCooling) {																				// Проверяет переход к графику
-                    refreshCooling(*state);																				// Получает температуры для отображения
+                    refreshCooling(window, *state);																		// Получает температуры для отображения
                 }																										// Завершает подготовку графика
+                const int mode = state->showCooling ? SW_SHOW : SW_HIDE;												// Выбирает видимость ползунка расчётной истории
+                ShowWindow(GetDlgItem(window, timeSlider), mode);														// Обновляет видимость системного ползунка
+                ShowWindow(GetDlgItem(window, timeLabel), mode);														// Обновляет видимость подписи времени
                 SetDlgItemTextW(window, coolingButton, state->showCooling ? L"Показать форму" : L"Охлаждение бочки");	// Обновляет подпись переключателя
                 redrawView(window);																						// Отображает выбранный вид
                 return 0;																								// Завершает обработку кнопки
             }																											// Завершает обработку переключения вида
             break;																										// Передаёт остальные команды Windows
+        case WM_HSCROLL: {																								// Получает изменение положения ползунка времени
+            const HWND slider = GetDlgItem(window, timeSlider);															// Находит ползунок расчётной истории
+            if (state->showCooling && reinterpret_cast<HWND>(lParam) == slider) {										// Проверяет источник сообщения
+                state->frame = static_cast<std::size_t>(SendMessageW(slider, TBM_GETPOS, 0, 0));						// Выбирает кадр по положению ползунка
+                redrawView(window);																						// Перерисовывает график и фазовые показатели
+                return 0;																								// Подтверждает обработку выбора кадра
+            }																											// Завершает проверку ползунка
+            break;																										// Передаёт другие сообщения прокрутки Windows
+        }																												// Завершает обработку времени
         case WM_CTLCOLORSTATIC: {																						// Позволяет окрасить строку состояния
             if (state->dimensionsAccepted && reinterpret_cast<HWND>(lParam) == GetDlgItem(window, statusText)) {		// Выбирает подтверждение применения
                 const auto context = reinterpret_cast<HDC>(wParam);														// Получает контекст сообщения состояния
@@ -229,6 +263,11 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
 }																														// Закрывает область локальных имён
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)															// Объявляет точку входа приложения Unicode
 {																														// Начинает запуск приложения
+    INITCOMMONCONTROLSEX sliderClasses{sizeof(sliderClasses), ICC_BAR_CLASSES};											// Запрашивает системный класс ползунка
+    if (!InitCommonControlsEx(&sliderClasses)) {																		// Проверяет доступность стандартных элементов Windows
+        MessageBoxW(nullptr, L"Не удалось загрузить ползунок Windows.", L"RollCast", MB_OK | MB_ICONERROR);				// Сообщает об ошибке запуска
+        return 1;																										// Завершает запуск при отсутствии ползунка
+    }																													// Завершает инициализацию стандартных элементов
     WNDCLASSW windowClass{};																							// Создаёт описание окна с нулевыми начальными полями
     windowClass.style = CS_HREDRAW | CS_VREDRAW;																		// Запрашивает перерисовку при изменении размеров
     windowClass.lpfnWndProc = windowProcedure;																			// Связывает класс окна с обработчиком сообщений
