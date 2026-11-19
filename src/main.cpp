@@ -1,4 +1,5 @@
 #include "cooling_view.h"																									// Подключает разрез и график охлаждения
+#include <algorithm>																										// Предоставляет ограничение ширины центральной панели
 #include <commctrl.h>																										// Предоставляет системный ползунок времени
 #include <exception>																										// Позволяет обработать ошибки расчёта фазы
 #include <windowsx.h>																										// Извлекает координаты указателя из оконного сообщения
@@ -7,11 +8,8 @@ namespace {																													// Ограничивает видимо
 constexpr wchar_t windowClassName[] = L"RollCastMainWindow";																// Указывает имя класса главного окна
 constexpr int firstDimension = 100;																							// Задаёт начальный идентификатор полей размеров
 constexpr int applyDimensions = 108;																						// Задаёт идентификатор кнопки применения размеров
-constexpr int coolingButton = 110;																							// Задаёт кнопку переключения расчётного графика
 constexpr int timeSlider = 111;																								// Задаёт идентификатор ползунка времени
 constexpr int timeLabel = 112;																								// Задаёт подпись выбора расчётного кадра
-constexpr int sectionPicker = 113;																							// Задаёт идентификатор выбора отделения
-constexpr int sectionLabel = 114;																							// Задаёт подпись списка отделений
 constexpr int circulationCheck = 115;																						// Задаёт переключатель учебной циркуляции
 constexpr int statusText = 109;																								// Задаёт идентификатор строки проверки
 constexpr int panelWidth = 256;																								// Задаёт ширину панели ввода
@@ -24,8 +22,6 @@ struct AppState {																											// Хранит состояние �
     bool trackingMouse = false;																								// Отслеживает выход курсора из окна
     bool dimensionsAccepted = false;																						// Отмечает успешное применение размеров
     bool circulation = false;																								// Сохраняет выбранную модель движения
-    bool showCooling = false;																								// Начинает с отображения формы
-    std::size_t selection = 0;																								// Выбирает сводку формы или одно отделение
     std::size_t frame = 0;																									// Хранит индекс выбранного расчётного состояния
     MoldCooling cooling;																									// Хранит четыре температурные истории
 };																															// Завершает описание состояния окна
@@ -39,8 +35,8 @@ HWND control(HWND window, const wchar_t* type, const wchar_t* text,													
     return child;																											// Передаёт дескриптор созданного элемента
 }																															// Завершает создание элемента
 void createControls(HWND window) {																							// Создаёт панель ввода четырёх отделений
-    control(window, L"BUTTON", L"Циркуляция (учебная)", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 470, 225, 20, circulationCheck);	// Добавляет выбор модели движения
-    control(window, L"STATIC", L"Учебные исходные размеры", 0, 28, 64, 235, 22, statusText);								// Подписывает исходные данные и выводит результат применения
+    control(window, L"BUTTON", L"Циркуляция расплава", BS_AUTOCHECKBOX | WS_TABSTOP, 28, 410, 225, 20, circulationCheck);	// Добавляет выбор модели движения
+    control(window, L"STATIC", L"Исходные размеры", 0, 28, 64, 235, 22, statusText);										// Подписывает исходные данные и выводит результат применения
     control(window, L"STATIC", L"Диаметр", 0, 127, 102, 67, 19);															// Подписывает столбец диаметров
     control(window, L"STATIC", L"Длина", 0, 199, 102, 66, 19);																// Подписывает столбец осевых длин
     for (int i = 0; i < static_cast<int>(demoDimensions.size()); ++i) {														// Добавляет строку для каждого отделения
@@ -61,25 +57,10 @@ void createControls(HWND window) {																							// Создаёт па�
     }																														// Завершает заполнение строк
     control(window, L"BUTTON", L"Применить", BS_PUSHBUTTON | WS_TABSTOP,													// Добавляет кнопку принятия введённых размеров
         28, 279, 113, 30, applyDimensions);																					// Назначает кнопке положение и идентификатор
-    control(window, L"BUTTON", L"Охлаждение формы", BS_PUSHBUTTON | WS_TABSTOP,												// Добавляет переход к температурному графику
-        28, 338, 157, 30, coolingButton);																					// Назначает положение и идентификатор кнопки
-    const HWND slider = control(window, TRACKBAR_CLASSW, L"", TBS_NOTICKS | WS_TABSTOP,										// Создаёт ползунок для расчётных кадров
-        24, 398, 218, 29, timeSlider);																						// Размещает ползунок под кнопками
-    const HWND caption = control(window, L"STATIC", L"Момент расчёта", 0,													// Создаёт подпись выбора времени
-        28, 380, 190, 18, timeLabel);																						// Размещает подпись над ползунком
-    ShowWindow(slider, SW_HIDE);																							// Скрывает выбор времени на видовом чертеже
-    ShowWindow(caption, SW_HIDE);																							// Скрывает подпись времени на видовом чертеже
-    const HWND picker = control(window, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,						// Создаёт список расчётных отделений
-        28, 448, 221, 146, sectionPicker);																					// Размещает список под ползунком
-    SendMessageW(picker, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Вся форма"));											// Добавляет общий вид всех отделений
-    for (const wchar_t* section : sectionNames) {																			// Перечисляет отделения формы снизу вверх
-        SendMessageW(picker, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(section));											// Добавляет выбор графика отделения
-    }																														// Завершает заполнение списка
-    SendMessageW(picker, CB_SETCURSEL, 0, 0);																				// Выбирает сводку при первом открытии
-    const HWND pickerCaption = control(window, L"STATIC", L"Отделение", 0,													// Добавляет название списка отделений
-        28, 430, 190, 18, sectionLabel);																					// Размещает подпись над списком
-    ShowWindow(picker, SW_HIDE);																							// Скрывает список в режиме просмотра формы
-    ShowWindow(pickerCaption, SW_HIDE);																						// Скрывает подпись списка на разрезе
+    control(window, TRACKBAR_CLASSW, L"", TBS_NOTICKS | WS_TABSTOP,															// Создаёт ползунок для расчётных кадров
+        24, 354, 218, 29, timeSlider);																						// Размещает ползунок под кнопками
+    control(window, L"STATIC", L"Момент расчёта", 0,																		// Создаёт подпись выбора времени
+        28, 336, 190, 18, timeLabel);																						// Размещает подпись над ползунком
 }																															// Завершает построение панели
 int readDimension(HWND window, int id) {																					// Читает один размер из поля ввода
     wchar_t text[6]{};																										// Принимает четыре цифры и конец строки
@@ -113,7 +94,6 @@ void refreshCooling(HWND window, AppState& state) {																			// Обн�
     SendMessageW(slider, TBM_SETPOS, TRUE, 0);																				// Выбирает начальный отсчёт времени
     SendMessageW(slider, TBM_SETPAGESIZE, 0, 120);																			// Задаёт шаг клавиш страниц в кадрах
     EnableWindow(slider, last != 0);																						// Включает выбор времени при успешном расчёте
-    EnableWindow(GetDlgItem(window, sectionPicker), last != 0);																// Разрешает сравнение рассчитанных отделений
 }																															// Завершает обновление расчёта и ползунка
 void redrawView(HWND window) {																								// Запрашивает перерисовку правой панели и заголовка
     RECT view{};																											// Подготавливает прямоугольник клиентской области
@@ -137,39 +117,33 @@ void applyControls(HWND window, AppState& state) {																			// Прим
     SetDlgItemTextW(window, statusText, L"✓  Размеры применены");															// Выводит галочку перед сообщением об успехе
     state.hovered = MoldPart::none;																							// Снимает подсветку при изменении геометрии
     state.hits.clear();																										// Удаляет старые области деталей формы
-    if (state.showCooling) {																								// Проверяет видимость температурного графика
-        refreshCooling(window, state);																						// Обновляет результаты изменённых отделений
-    }																														// Завершает проверку текущего вида
+    refreshCooling(window, state);																							// Обновляет расчёт после применения размеров
     redrawView(window);																										// Отображает новую геометрию или температуры
 }																															// Завершает применение параметров
-void drawContent(HDC device, const RECT& client, AppState& state) {															// Рисует холст и разрез формы
-    FillRect(device, &client, GetSysColorBrush(COLOR_3DFACE));																// Закрашивает рабочую область системным фоном
-    const RECT panel{16, 52, 16 + panelWidth, client.bottom - 16};															// Задаёт границы панели под полями
-    FrameRect(device, &panel, GetSysColorBrush(COLOR_3DSHADOW));															// Обводит панель ввода
-    const RECT area{split, 52, client.right - 16, client.bottom - 16};														// Задаёт границы правого холста
-    FillRect(device, &area, GetSysColorBrush(COLOR_WINDOW));																// Закрашивает холст белым цветом
-    FrameRect(device, &area, GetSysColorBrush(COLOR_3DSHADOW));																// Обводит холст разреза
-    SelectObject(device, GetStockObject(DEFAULT_GUI_FONT));																	// Выбирает системный шрифт заголовка
-    SetBkMode(device, TRANSPARENT);																							// Сохраняет фон под заголовком
-    SetTextColor(device, GetSysColor(COLOR_WINDOWTEXT));																	// Использует системный цвет текста
-    constexpr wchar_t panelHeading[] = L"Размеры отделений, мм";															// Задаёт заголовок над рамкой панели
-    TextOutW(device, 16, 25, panelHeading, static_cast<int>(std::size(panelHeading)) - 1);									// Выводит название панели размеров
-    const wchar_t* heading = state.selection == 0 ? L"Охлаждение формы" : sectionNames[state.selection - 1];				// Выбирает название расчётной панели
-    if (!state.showCooling) {																								// Проверяет отображение чертежа формы
-        heading = L"Форма в сборе для заливки валка";																		// Подписывает чертёж формы вместо результатов
-    }																														// Завершает выбор заголовка панели
-    TextOutW(device, split, 25, heading, static_cast<int>(std::wcslen(heading)));											// Выводит заголовок над правой рамкой
-    if (state.showCooling) {																								// Проверяет какой вид открыт справа
-        if (state.selection == 0) {																							// Проверяет выбор общего вида формы
-            drawMoldOverview(device, area, state.cooling, state.dimensions, state.frame);									// Показывает сводку всех отделений
-        } else {																											// Обрабатывает выбор отдельного цилиндра
-            const auto section = state.selection - 1;																		// Переходит от списка к номеру отделения
-            drawCooling(device, area, state.cooling.section(section), state.dimensions[section], state.frame);				// Строит кривые и таблицу отделения
-        }																													// Завершает выбор расчётного вида
-    } else {																												// Обрабатывает основной вид формы
-        drawMold(device, area, state.dimensions, state.hits, state.hovered, state.cursor);									// Рисует форму и подсказку
-    }																														// Завершает выбор содержимого панели
-}																															// Завершает рисование рабочего вида
+void drawContent(HDC device, const RECT& client, AppState& state) {															// Рисует параметры форму и результаты одновременно
+    FillRect(device, &client, GetSysColorBrush(COLOR_3DFACE));																// Закрашивает фон рабочей области
+    const RECT panel{16, 52, 16 + panelWidth, client.bottom - 16};															// Задаёт рамку панели параметров
+    const int available = client.right - split - 28;																		// Находит ширину формы и результатов
+    const int moldWidth = std::clamp(available / 3, 250, 420);																// Оставляет место для полного разреза
+    const RECT mold{split, 52, split + moldWidth, client.bottom - 16};														// Задаёт центральную панель формы
+    const RECT results{mold.right + 12, 52, client.right - 16, client.bottom - 16};											// Задаёт правую панель результатов
+    FrameRect(device, &panel, GetSysColorBrush(COLOR_3DSHADOW));															// Обводит панель параметров
+    FillRect(device, &mold, GetSysColorBrush(COLOR_WINDOW));																// Очищает фон разреза
+    FrameRect(device, &mold, GetSysColorBrush(COLOR_3DSHADOW));																// Обводит центральную панель
+    FillRect(device, &results, GetSysColorBrush(COLOR_WINDOW));																// Очищает фон графиков
+    FrameRect(device, &results, GetSysColorBrush(COLOR_3DSHADOW));															// Обводит панель результатов
+    SelectObject(device, GetStockObject(DEFAULT_GUI_FONT));																	// Выбирает системный шрифт подписей
+    SetBkMode(device, TRANSPARENT);																							// Сохраняет фон под подписями
+    SetTextColor(device, GetSysColor(COLOR_WINDOWTEXT));																	// Выбирает системный цвет текста
+    constexpr wchar_t panelHeading[] = L"Размеры отделений, мм";															// Называет панель параметров
+    TextOutW(device, 16, 25, panelHeading, static_cast<int>(std::size(panelHeading)) - 1);									// Выводит заголовок над панелью
+    constexpr wchar_t moldHeading[] = L"Форма в сборе для заливки валка";													// Называет центральный разрез
+    TextOutW(device, mold.left, 25, moldHeading, static_cast<int>(std::size(moldHeading)) - 1);								// Подписывает панель формы
+    constexpr wchar_t resultsHeading[] = L"Охлаждение и затвердевание";														// Называет графики и сводку
+    TextOutW(device, results.left, 25, resultsHeading, static_cast<int>(std::size(resultsHeading)) - 1);					// Подписывает панель результатов
+    drawMold(device, mold, state.dimensions, state.hits, state.hovered, state.cursor);										// Рисует разрез с доступным наведением
+    drawMoldDashboard(device, results, state.cooling, state.dimensions, state.frame);										// Рисует сводку и четыре графика
+}																															// Завершает построение общего экрана
 void paintWindow(HWND window, AppState& state) {																			// Рисует кадр без промежуточного мерцания
     PAINTSTRUCT paint{};																									// Хранит сведения об области перерисовки
     const HDC target = BeginPaint(window, &paint);																			// Получает контекст окна для рисования
@@ -202,10 +176,11 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
         }																													// Завершает привязку состояния
         case WM_CREATE:																										// Получает сообщение о создании главного окна
             createControls(window);																							// Добавляет поля размеров и кнопку
+            refreshCooling(window, *state);																					// Рассчитывает результаты сразу при запуске
             return 0;																										// Подтверждает создание интерфейса
         case WM_GETMINMAXINFO: {																							// Ограничивает минимальный размер окна
             auto* limits = reinterpret_cast<MINMAXINFO*>(lParam);															// Получает параметры масштабирования Windows
-            limits->ptMinTrackSize = {840, 530};																			// Оставляет место для панели и разреза
+            limits->ptMinTrackSize = {1120, 740};																			// Оставляет место для панели и разреза
             return 0;																										// Применяет ограничения размера
         }																													// Завершает настройку размера
         case WM_COMMAND:																									// Получает команды элементов управления
@@ -219,34 +194,10 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
                 applyControls(window, *state);																				// Проверяет и применяет введённый набор
                 return 0;																									// Подтверждает обработку нажатия
             }																												// Завершает проверку команды
-            if (LOWORD(wParam) == coolingButton && HIWORD(wParam) == BN_CLICKED) {											// Распознаёт переключение вида
-                state->showCooling = !state->showCooling;																	// Переключает разрез и график справа
-                state->hits.clear();																						// Удаляет карту предыдущего вида
-                state->hovered = MoldPart::none;																			// Сбрасывает выделение деталей формы
-                if (state->showCooling) {																					// Проверяет переход к графику
-                    refreshCooling(window, *state);																			// Получает температуры для отображения
-                }																											// Завершает подготовку графика
-                const int mode = state->showCooling ? SW_SHOW : SW_HIDE;													// Выбирает видимость ползунка расчётной истории
-                ShowWindow(GetDlgItem(window, timeSlider), mode);															// Обновляет видимость системного ползунка
-                ShowWindow(GetDlgItem(window, timeLabel), mode);															// Обновляет видимость подписи времени
-                ShowWindow(GetDlgItem(window, sectionPicker), mode);														// Обновляет видимость списка отделений
-                ShowWindow(GetDlgItem(window, sectionLabel), mode);															// Обновляет видимость подписи списка
-                SetDlgItemTextW(window, coolingButton, state->showCooling ? L"Показать форму" : L"Охлаждение формы");		// Обновляет подпись переключателя
-                redrawView(window);																							// Отображает выбранный вид
-                return 0;																									// Завершает обработку кнопки
-            }																												// Завершает обработку переключения вида
-            if (LOWORD(wParam) == sectionPicker && HIWORD(wParam) == CBN_SELCHANGE) {										// Обрабатывает выбор расчётного отделения
-                const auto raw = SendMessageW(reinterpret_cast<HWND>(lParam), CB_GETCURSEL, 0, 0);							// Получает выбранную строку списка
-                if (raw >= 0 && raw <= static_cast<LRESULT>(demoDimensions.size())) {										// Проверяет индекс сводки или отделения
-                    state->selection = static_cast<std::size_t>(raw);														// Сохраняет выбор без изменения времени
-                    redrawView(window);																						// Обновляет результат на текущем кадре
-                }																											// Завершает проверку выбора отделения
-                return 0;																									// Подтверждает обработку выбора
-            }																												// Завершает обработку смены расчётного вида
             break;																											// Передаёт остальные команды Windows
         case WM_HSCROLL: {																									// Получает изменение положения ползунка времени
             const HWND slider = GetDlgItem(window, timeSlider);																// Находит ползунок расчётной истории
-            if (state->showCooling && reinterpret_cast<HWND>(lParam) == slider) {											// Проверяет источник сообщения
+            if (reinterpret_cast<HWND>(lParam) == slider) {																	// Проверяет источник сообщения
                 state->frame = static_cast<std::size_t>(SendMessageW(slider, TBM_GETPOS, 0, 0));							// Выбирает кадр по положению ползунка
                 redrawView(window);																							// Перерисовывает график и фазовые показатели
                 return 0;																									// Подтверждает обработку выбора кадра
@@ -263,9 +214,6 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
             break;																											// Оставляет обычные подписи системного цвета
         }																													// Завершает обработку цвета элементов
         case WM_MOUSEMOVE: {																								// Отслеживает указатель над деталями формы
-            if (state->showCooling) {																						// Проверяет отображение температурного графика
-                break;																										// Пропускает поиск детали вне вида формы
-            }																												// Завершает проверку текущего вида
             if (!state->trackingMouse) {																					// Проверяет наличие регистрации выхода курсора
                 TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, window, 0};													// Запрашивает сообщение об уходе указателя
                 state->trackingMouse = TrackMouseEvent(&track) != FALSE;													// Запоминает успешную регистрацию ухода
