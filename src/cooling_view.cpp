@@ -88,6 +88,8 @@ void drawCooling(HDC device, const RECT& area, const CoolingResult& result,					
     std::swprintf(caption, 120, L"%ls   ·   Ось %.1f °C   ·   Стенка %.1f °C",													// Готовит сводку для выбранного момента
         selectedTime, selected.axisTemperature, selected.surfaceTemperature);													// Передаёт время и температуры металла
     label(device, area.left + 17, area.top + 61, caption);																		// Отображает значения над температурными кривыми
+    std::swprintf(caption, 120, L"Масштаб циркуляции %.4f м/с", selected.circulationSpeed);										// Подписывает скорость выбранного кадра
+    label(device, area.left + 240, area.top + 40, caption);																		// Выводит масштаб учебного движения
     SelectObject(device, grid);																									// Выбирает осветлённые линии делений
     for (int temperature = 0; temperature <= 1600; temperature += 400) {														// Размечает температуру шагом четыреста градусов
         const int row = y(temperature);																							// Определяет положение горизонтальной линии

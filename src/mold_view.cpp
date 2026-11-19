@@ -112,7 +112,7 @@ const wchar_t* partName(MoldPart part) {																			// Сопоставл
         case MoldPart::riser: return L"Прибыльная надставка";														// Называет верхнюю надставку
         case MoldPart::upperModel: return L"Модель верхней шейки";													// Называет модель верхней шейки
         case MoldPart::funnel: return L"Воронка";																	// Называет вход литниковой системы
-        case MoldPart::pipe: return L"Литн. труба";																	// Называет вертикальную литниковую трубу
+        case MoldPart::pipe: return L"Литниковая труба";															// Называет вертикальную литниковую трубу
         case MoldPart::upperFrame: return L"Верхняя рамка";															// Называет рамку над кокилем
         case MoldPart::rod: return L"«Сигналка»";																	// Называет центральный контрольный стержень
         case MoldPart::plug: return L"Модель заделки";																// Называет нижнюю зону модели верхней шейки
