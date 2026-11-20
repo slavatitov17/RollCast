@@ -1,5 +1,5 @@
 #pragma once																					// Защищает заголовок расчёта формы от повторного подключения
-#include "cooling.h"																			// Подключает расчёт и фазовые данные одного цилиндра
+#include "project.h"																																		// Подключает расчёт и фазовые данные одного цилиндра
 #include "mold_dimensions.h"																	// Подключает независимую от Windows геометрию формы
 struct PhaseVolumes {																			// Хранит абсолютные объёмы двух фаз металла
     double solid;																				// Хранит объём твёрдой фазы в кубометрах
@@ -8,7 +8,8 @@ struct PhaseVolumes {																			// Хранит абсолютные о�
 double cylinderVolume(const SectionDimensions& dimensions);										// Вычисляет геометрический объём цилиндрического отделения
 PhaseVolumes phaseVolumes(const SectionDimensions& dimensions, const CoolingSample& sample);	// Вычисляет объёмы фаз в выбранном кадре
 class MoldCooling {																				// Хранит согласованные истории всех отделений формы
-public:																							// Предоставляет расчёт и чтение общей шкалы времени
+public:																																						// Открывает расчёт и чтение историй
+    void calculate(const Project& project, std::stop_token stop = {});																						// Рассчитывает заданный проект с возможностью отмены
     bool refresh(const MoldDimensions& dimensions, bool circulation = false);					// Пересчитывает отделения с изменившимися диаметрами
     std::size_t sampleCount() const;															// Возвращает число кадров общей шкалы
     const CoolingResult& section(std::size_t index) const;										// Возвращает историю выбранного отделения
@@ -16,6 +17,7 @@ public:																							// Предоставляет расчёт и чт
     std::optional<double> completedAt() const;													// Находит момент полного затвердевания всех отделений
 private:																						// Хранит данные только для внутреннего обновления
     std::array<CoolingResult, demoDimensions.size()> histories{};								// Сохраняет результаты по отделениям снизу вверх
+    bool configured = false;																																// Различает пользовательские и демонстрационные истории
     bool hasCirculation = false;																// Запоминает режим сохранённых историй
     std::array<int, 4> lengths{};																// Запоминает длины для модели движения
     std::array<int, demoDimensions.size()> diameters{};											// Запоминает диаметры рассчитанных отделений

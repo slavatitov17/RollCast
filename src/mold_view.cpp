@@ -11,13 +11,20 @@ void MoldHitMap::clear() {																							// Удаляет экранн�
     for (const auto& area : areas) {																				// Обходит записанные элементы формы
         DeleteObject(area.region);																					// Освобождает графический дескриптор
     }																												// Завершает обход элементов
-    areas.clear();																									// Удаляет записи карты
+    areas.clear();																																			// Удаляет освобождённые элементы карты
+    if (casting) { DeleteObject(casting); casting = nullptr; }																								// Освобождает объединённую полость отливки
+    if (runners) { DeleteObject(runners); runners = nullptr; }																								// Освобождает объединённые каналы
 }																													// Завершает очистку карты
 void MoldHitMap::add(HRGN region, MoldPart part) {																	// Сохраняет область вместе с именем элемента
     if (region) {																									// Проверяет успешность создания области
         areas.push_back({region, part});																			// Сохраняет область в порядке отрисовки
     }																												// Завершает проверку области
 }																													// Завершает регистрацию области
+void MoldHitMap::addFluid(HRGN region, bool metal) {																										// Объединяет белые полости без стенок формы
+    HRGN& target = metal ? casting : runners;																												// Выбирает отливку или литниковую систему
+    if (!target) { target = CreateRectRgn(0, 0, 0, 0); }																									// Создаёт начальную пустую область
+    CombineRgn(target, target, region, RGN_OR);																												// Добавляет очередную полость к маске
+}																																							// Завершает объединение полостей
 MoldPart MoldHitMap::partAt(POINT cursor) const {																	// Находит видимый элемент под курсором
     for (auto it = areas.rbegin(); it != areas.rend(); ++it) {														// Ищет от верхнего слоя изображения
         if (PtInRegion(it->region, cursor.x, cursor.y)) {															// Проверяет попадание в контур элемента
@@ -41,7 +48,8 @@ struct Drawing {																									// Преобразует точки ч
     MoldPart hovered;																								// Хранит текущий элемент под курсором
     HPEN outline;																									// Задаёт обычный контур детали
     HPEN mutedOutline;																								// Задаёт осветлённый контур остальных деталей
-    HBRUSH mutedFill;																								// Задаёт осветлённую заливку остальных деталей
+    HBRUSH mutedFill;																																		// Хранит кисть приглушённых элементов
+    bool rebuild;																																			// Управляет обновлением геометрической карты
     void style(MoldPart part, HBRUSH fill) const {																	// Выбирает яркость текущей части формы
         const bool muted = hovered != MoldPart::none && hovered != part;											// Проверяет необходимость приглушения элемента
         SelectObject(device, muted ? mutedOutline : outline);														// Выбирает цвет контура
@@ -60,7 +68,14 @@ struct Drawing {																									// Преобразует точки ч
         const int count = static_cast<int>(points.size());															// Переводит размер к типу Win32
         style(part, fill);																							// Устанавливает цвет элемента формы
         Polygon(device, points.data(), count);																		// Рисует заполненный контур
-        hits.add(CreatePolygonRgn(points.data(), count, ALTERNATE), part);											// Регистрирует ту же геометрию для наведения
+        if (rebuild) {																																		// Строит области только после изменения геометрии
+            const HRGN region = CreatePolygonRgn(points.data(), count, ALTERNATE);																			// Создаёт область многоугольника
+            if (fill == GetStockObject(WHITE_BRUSH)) {																										// Распознаёт внутреннюю полость формы
+                const bool metal = part == MoldPart::upperModel || part == MoldPart::plug || part == MoldPart::barrel || part == MoldPart::lowerModelMiddle || part == MoldPart::lowerModelBottom;	// Отделяет отливку от литников
+                hits.addFluid(region, metal);																												// Дополняет маску металла
+            }																																				// Завершает обработку внутренних полостей
+            hits.add(region, part);																															// Передаёт области владение геометрической карте
+        }																																					// Завершает обновление областей наведения
     }																												// Завершает отрисовку многоугольника
     void box(double left, double top, double right, double bottom, HBRUSH fill, MoldPart part) const {				// Рисует прямоугольный элемент
         shape({{left, top}, {right, top}, {right, bottom}, {left, bottom}}, fill, part);							// Передаёт четыре угла элемента
@@ -129,29 +144,28 @@ const wchar_t* partName(MoldPart part) {																			// Сопоставл
     }																												// Завершает выбор названия
     return L"";																										// Защищает вывод при неизвестном идентификаторе
 }																													// Завершает получение названия
-void drawLabel(const Drawing& drawing, POINT cursor) {																// Показывает название рядом с указателем
-    const wchar_t* text = partName(drawing.hovered);																// Получает название выбранного элемента
+}																																							// Завершает область внутренних функций формы
+void drawMoldLabel(HDC device, const RECT& area, MoldPart part, POINT cursor) {																				// Показывает название рядом с указателем
+    const wchar_t* text = partName(part);																													// Получает название выбранного элемента
     const int length = static_cast<int>(std::wcslen(text));															// Находит длину строки для Win32
     if (length == 0) {																								// Проверяет наличие выбранного элемента
         return;																										// Оставляет рисунок без подписи
     }																												// Завершает проверку выбора
-    SelectObject(drawing.device, GetStockObject(DEFAULT_GUI_FONT));													// Выбирает системный шрифт подписи
-    SetBkMode(drawing.device, TRANSPARENT);																			// Оставляет заливку подсказки под текстом
-    SetTextColor(drawing.device, RGB(27, 45, 57));																	// Задаёт читаемый тёмный цвет текста
+    SelectObject(device, GetStockObject(DEFAULT_GUI_FONT));																									// Выбирает системный шрифт подписи
+    SetBkMode(device, TRANSPARENT);																															// Оставляет заливку подсказки под текстом
+    SetTextColor(device, RGB(27, 45, 57));																													// Задаёт читаемый тёмный цвет текста
     SIZE size{};																									// Принимает размеры текста в пикселях
-    GetTextExtentPoint32W(drawing.device, text, length, &size);														// Измеряет подпись выбранного элемента
-    const RECT& area = drawing.viewport;																			// Берёт видимые границы чертежа
+    GetTextExtentPoint32W(device, text, length, &size);																										// Измеряет подпись выбранного элемента
     const LONG x = std::clamp(cursor.x + 14, area.left + 3, std::max(area.left + 3, area.right - size.cx - 19));	// Вмещает подпись по горизонтали
     const LONG y = std::clamp(cursor.y + 17, area.top + 3, std::max(area.top + 3, area.bottom - size.cy - 15));		// Вмещает подпись по вертикали
     const RECT label{x, y, x + size.cx + 15, y + size.cy + 10};														// Задаёт поля вокруг подписи
-    FillRect(drawing.device, &label, GetSysColorBrush(COLOR_INFOBK));												// Закрашивает фон подписи
-    FrameRect(drawing.device, &label, GetSysColorBrush(COLOR_3DSHADOW));											// Обводит подсказку тонкой рамкой
-    TextOutW(drawing.device, x + 7, y + 5, text, length);															// Выводит имя возле выбранного элемента
+    FillRect(device, &label, GetSysColorBrush(COLOR_INFOBK));																								// Закрашивает фон подписи
+    FrameRect(device, &label, GetSysColorBrush(COLOR_3DSHADOW));																							// Обводит подсказку тонкой рамкой
+    TextOutW(device, x + 7, y + 5, text, length);																											// Выводит имя возле выбранного элемента
 }																													// Завершает отрисовку подписи
-}																													// Завершает область вспомогательных средств
 void drawMold(HDC device, const RECT& area, const MoldDimensions& dimensions,										// Рисует форму внутри правой панели
-    MoldHitMap& hits, MoldPart hovered, POINT cursor) {																// Подписывает элемент и сохраняет экранные области
-    hits.clear();																									// Обновляет карту вместе с текущим изображением
+    MoldHitMap& hits, MoldPart hovered, POINT cursor, const MoldFrame& frameState, bool rebuild) {															// Подписывает элемент и сохраняет экранные области
+    if (rebuild) { hits.clear(); }																															// Обновляет карту только при новой геометрии
     const auto& [lower, barrel, upper, riser] = dimensions;															// Распаковывает отделения снизу вверх
     const double riserRadius = riser.diameter / 2.0;																// Вычисляет наружный радиус полости прибыли
     const double upperRadius = upper.diameter / 2.0;																// Вычисляет радиус верхней шейки
@@ -188,7 +202,7 @@ void drawMold(HDC device, const RECT& area, const MoldDimensions& dimensions,			
     const Drawing drawing{device, scale,																			// Подготавливает единый масштаб разреза
         area.left + 26 + (width - sceneWidth * scale) / 2 + (frame + 135) * scale,									// Центрирует чертёж по горизонтали
         area.top + 18 + (height - sceneHeight * scale) / 2 - funnelTop * scale,										// Центрирует чертёж по высоте
-        area, hits, hovered, outline, mutedOutline, mutedFill};														// Подключает области наведения и цвета подсветки
+        area, hits, hovered, outline, mutedOutline, mutedFill, rebuild};																					// Подключает области наведения и цвета подсветки
     const double plugTop = barrelTop - upper.height * 0.23;															// Отмечает границу модели заделки
     drawing.box(-frame, 0, frame, upperTop, hatch, MoldPart::riser);												// Рисует стенки прибыльной надставки
     drawing.box(-frame + 120, 0, frame - 120, upperTop, dots, MoldPart::riser);										// Рисует внутренние слои надставки
@@ -219,7 +233,7 @@ void drawMold(HDC device, const RECT& area, const MoldDimensions& dimensions,			
                    {-joinRadius, baseTop}}, empty, MoldPart::lowerModelMiddle);										// Регистрирует среднюю часть нижней модели
     drawing.shape({{-joinRadius, baseTop}, {joinRadius, baseTop}, {lowerRadius * 0.76, floor},						// Задаёт нижнюю часть шейки
                    {-lowerRadius * 0.76, floor}}, empty, MoldPart::lowerModelBottom);								// Регистрирует нижнюю часть модели
-    drawing.box(-10, 0, 10, barrelTop + barrel.height * 0.22, fastener, MoldPart::rod);								// Рисует контрольный стержень
+																																							// Рисует контрольный стержень
     drawing.box(pipe - 172, funnelBottom, collar, baseTop, hatch, MoldPart::pipe);									// Рисует наружную стенку литниковой трубы
     for (double joint : {funnelBottom, floor * 0.27, floor * 0.56, baseTop}) {										// Расставляет крепления вдоль трубы
         drawing.box(pipe - 248, joint - 26, pipe + 248, joint + 26, hatch, MoldPart::pipe);							// Рисует кольцевой выступ трубы
@@ -254,8 +268,60 @@ void drawMold(HDC device, const RECT& area, const MoldDimensions& dimensions,			
     elbowPath();																									// Готовит видимый контур колена
     StrokeAndFillPath(device);																						// Рисует стенки и внутренний канал
     elbowPath();																									// Повторяет контур для карты наведения
-    hits.add(PathToRegion(device), MoldPart::elbow);																// Регистрирует точную область изогнутого канала
-    drawLabel(drawing, cursor);																						// Показывает имя только выбранного элемента
+    if (rebuild) {																																			// Обновляет маску изогнутого литникового канала
+        const HRGN region = PathToRegion(device);																											// Получает внутреннюю область колена
+        hits.addFluid(region, false);																														// Добавляет колено к маске литников
+        hits.add(region, MoldPart::elbow);																													// Регистрирует область для наведения
+    }																																						// Завершает обновление колена
+    const HBRUSH phaseBrushes[]{CreateSolidBrush(RGB(45, 112, 181)), CreateSolidBrush(RGB(242, 177, 46)), CreateSolidBrush(RGB(228, 76, 57)), CreateSolidBrush(RGB(236, 240, 243))};	// Задаёт цвета твёрдого двухфазного и жидкого металла
+    const auto fillBox = [&](double left, double top, double right, double bottom, HBRUSH brush) {															// Закрашивает прямоугольник в координатах модели
+        const POINT first = drawing.pixel({left, top});																										// Находит верхний левый угол
+        const POINT last = drawing.pixel({right, bottom});																									// Находит нижний правый угол
+        const RECT rectangle{first.x, first.y, last.x, last.y};																								// Собирает экранный прямоугольник
+        FillRect(device, &rectangle, brush);																												// Окрашивает только разрешённую часть полости
+    };																																						// Завершает вспомогательную заливку прямоугольника
+    const bool mutedRunners = hovered != MoldPart::none && hovered != MoldPart::funnel && hovered != MoldPart::pipe && hovered != MoldPart::gate && hovered != MoldPart::elbow;	// Приглушает литники при выборе другой детали
+    const HBRUSH runnerBrush = phaseBrushes[mutedRunners ? 3 : 2];																							// Сохраняет контраст выбранной литниковой детали
+    if (hits.runners && frameState.filling > 0) {																											// Показывает продвижение металла по литникам
+        const int clip = SaveDC(device);																													// Сохраняет область перед окраской каналов
+        SelectClipRgn(device, hits.runners);																												// Исключает окраску стенок литниковой системы
+        const double front = funnelTop + (turn + lead - funnelTop) * std::min(1.0, frameState.filling / 0.14);												// Продвигает металл вниз по трубе
+        fillBox(pipe - 212, funnelTop, pipe + 400, front, runnerBrush);																						// Заполняет воронку трубу и колено
+        if (frameState.filling > 0.14) {																													// Продолжает путь по наклонному питателю
+            const double start = pipe - 212 - (pipe - 212 - entry(gate + halfGate)) * std::min(1.0, (frameState.filling - 0.14) / 0.06);					// Перемещает фронт от колена к отливке
+            fillBox(start, turn - lead, pipe - 204, floor, runnerBrush);																					// Заполняет питатель перед подъёмом в отливке
+        }																																					// Завершает движение по питателю
+        RestoreDC(device, clip);																															// Восстанавливает ограничения рисования
+    }																																						// Завершает окраску литников
+    const double tops[]{lowerTop, barrelTop, upperTop, 0};																									// Хранит верхние отметки отделений
+    const double bottoms[]{floor, lowerTop, barrelTop, upperTop};																							// Хранит нижние отметки отделений
+    if (hits.casting) {																																		// Проверяет наличие геометрии отливки
+        for (std::size_t section = 0; section < 4; ++section) {																								// Окрашивает текущее состояние каждого отделения
+            const bool active = hovered == MoldPart::none || (section == 0 && (hovered == MoldPart::lowerModelMiddle || hovered == MoldPart::lowerModelBottom)) || (section == 1 && hovered == MoldPart::barrel) || (section >= 2 && (hovered == MoldPart::upperModel || hovered == MoldPart::plug));	// Выделяет металл только выбранного отделения
+            const int clip = SaveDC(device);																												// Сохраняет область отделения
+            SelectClipRgn(device, hits.casting);																											// Ограничивает окраску внутренней полостью отливки
+            const double front = bottoms[section] - (bottoms[section] - tops[section]) * frameState.filled[section];										// Вычисляет уровень по объёму цилиндра
+            const POINT first = drawing.pixel({-frame, front});																								// Находит верхнюю границу заполненного металла
+            const POINT last = drawing.pixel({frame, bottoms[section]});																					// Находит нижнюю границу отделения
+            IntersectClipRect(device, first.x, first.y, last.x, last.y);																					// Исключает ещё пустую часть формы
+            fillBox(-frame, front, frame, bottoms[section], phaseBrushes[active ? 2 : 3]);																	// Сначала показывает металл жидким
+            const auto* sample = frameState.samples[section];																								// Получает температурный профиль выбранного момента
+            if (sample && frameState.filling >= 1) {																										// Включает фазовую окраску после заполнения
+                for (std::size_t i = 1; i < sample->profile.size(); ++i) {																					// Обходит кольцевые элементы температурного профиля
+                    const auto& inner = sample->profile[i - 1];																								// Получает внутренний узел кольца
+                    const auto& outer = sample->profile[i];																									// Получает наружный узел кольца
+                    const double temperature = (inner.temperature + outer.temperature) / 2;																	// Оценивает состояние тонкого радиального кольца
+                    const int phase = temperature <= frameState.phase.solidus ? 0 : temperature >= frameState.phase.liquidus ? 2 : 1;						// Выбирает цвет геометрической зоны
+                    fillBox(inner.radius * 1000, tops[section], outer.radius * 1000, bottoms[section], phaseBrushes[active ? phase : 3]);					// Окрашивает правую половину кольца
+                    fillBox(-outer.radius * 1000, tops[section], -inner.radius * 1000, bottoms[section], phaseBrushes[active ? phase : 3]);					// Окрашивает левую половину кольца
+                }																																			// Завершает окраску радиального профиля
+            }																																				// Завершает проверку стадии охлаждения
+            RestoreDC(device, clip);																														// Восстанавливает исходную область рисования
+        }																																					// Завершает окраску четырёх отделений
+    }																																						// Завершает проверку полости отливки
+    for (const HBRUSH brush : phaseBrushes) { DeleteObject(brush); }																						// Освобождает кисти фазовой окраски
+    drawing.box(-10, 0, 10, barrelTop + barrel.height * 0.22, fastener, MoldPart::rod);																		// Возвращает видимость сигнального стержня
+    static_cast<void>(cursor);																																// Сохраняет совместимость аргумента положения указателя
     RestoreDC(device, saved);																						// Возвращает настройки контекста окна
     DeleteObject(mutedFill);																						// Освобождает осветлённую кисть
     DeleteObject(mutedOutline);																						// Освобождает осветлённое перо

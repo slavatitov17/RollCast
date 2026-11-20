@@ -2,6 +2,7 @@
 #include "phase_change.h"																																		// Подключает параметры и геометрию фазовых зон
 #include <optional>																																				// Хранит момент полного затвердевания при достижении солидуса
 #include <span>																																					// Передаёт слои модели без копирования массива
+#include <stop_token>																																		// Позволяет прервать фоновый расчёт
 #include <vector>																																				// Хранит рассчитанные температуры во времени
 struct CoolingLayer {																																			// Задаёт кольцевой слой радиальной расчётной области
     double thickness;																																			// Задаёт толщину слоя в метрах
@@ -16,6 +17,9 @@ struct CoolingBoundary {																																		// Хранит нас
     double heatTransfer;																																		// Задаёт теплоотдачу в ваттах на квадратный метр-кельвин
     double duration;																																			// Задаёт длительность расчёта в секундах
     double maxStep;																																				// Ограничивает шаг расчёта в секундах
+    double metalContact = 0;																																// Задаёт конечный контакт металла с формой
+    double formContact = 0;																																	// Задаёт конечный контакт материалов формы
+    bool recordProfile = false;																																// Включает профиль для окраски фаз на схеме
 };																																								// Завершает описание настроек
 struct MeltCirculation {																																		// Задаёт сокращённую модель циркуляционного обмена
     double length;																																				// Задаёт осевую длину отделения в метрах
@@ -28,6 +32,7 @@ struct CoolingSample {																																			// Хранит тем�
     double surfaceTemperature;																																	// Хранит температуру металла на боковой стенке
     PhaseSummary phase{};																																		// Хранит распределение фаз в текущий момент
     double circulationSpeed = 0;																																// Хранит масштаб скорости учебной циркуляции
+    std::vector<RadialTemperature> profile{};																												// Хранит радиальный профиль для цветной схемы
 };																																								// Завершает описание отсчёта температуры
 struct CoolingResult {																																			// Объединяет историю температур и проверку баланса
     std::vector<CoolingSample> samples;																															// Хранит начальный и последующие отсчёты
@@ -35,5 +40,5 @@ struct CoolingResult {																																			// Объединяет
     std::optional<double> completedAt;																															// Хранит время полного затвердевания при его достижении
 };																																								// Завершает описание результата
 CoolingResult solveCooling(std::span<const CoolingLayer> layers, CoolingBoundary boundary,																		// Принимает слои и внешнее условие
-    std::optional<PhaseChange> phase = std::nullopt, std::optional<MeltCirculation> circulation = std::nullopt);												// Включает скрытую теплоту при задании фазы
+    std::optional<PhaseChange> phase = std::nullopt, std::optional<MeltCirculation> circulation = std::nullopt, std::stop_token stop = {});					// Включает скрытую теплоту при задании фазы
 CoolingResult demonstrationCooling(int diameterMm, std::optional<PhaseChange> phase = std::nullopt, std::optional<MeltCirculation> circulation = std::nullopt);	// Рассчитывает учебный пример для диаметра бочки
