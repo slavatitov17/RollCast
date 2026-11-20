@@ -2,7 +2,8 @@
 #include <array>																		// Хранит размеры четырёх отделений формы
 struct SectionDimensions {																// Хранит размеры цилиндрического отделения формы
     int diameter;																		// Задаёт диаметр в миллиметрах
-    int height;																			// Задаёт высоту в миллиметрах
+    int height;																																				// Задаёт осевую длину в миллиметрах
+    bool operator==(const SectionDimensions&) const = default;																								// Сравнивает геометрию для сохранения проекта
 };																						// Завершает описание размеров отделения
 using MoldDimensions = std::array<SectionDimensions, 4>;								// Упорядочивает отделения формы снизу вверх
 inline constexpr MoldDimensions demoDimensions{{										// Задаёт условные исходные размеры

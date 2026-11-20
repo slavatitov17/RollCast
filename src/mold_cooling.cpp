@@ -21,7 +21,7 @@ bool MoldCooling::refresh(const MoldDimensions& dimensions, bool circulation) {	
         if (diameter <= 0 || dimensions[i].height <= 0) {																											// Проверяет положительность размеров каждого отделения
             throw std::invalid_argument("Invalid section dimensions");																								// Отклоняет некорректную геометрию формы
         }																																							// Завершает проверку размеров отделения
-        if (diameters[i] != diameter || hasCirculation != circulation || (circulation && lengths[i] != dimensions[i].height)) {										// Проверяет изменение радиального масштаба
+        if (configured || diameters[i] != diameter || hasCirculation != circulation || (circulation && lengths[i] != dimensions[i].height)) {				// Проверяет изменение радиального масштаба
             pending[i] = demonstrationCooling(diameter, demoPhase, circulation ? std::optional<MeltCirculation>{{dimensions[i].height / 1000.0}} : std::nullopt);	// Рассчитывает затвердевание одного отделения
             changed = true;																																			// Отмечает появление новой истории
         }																																							// Завершает решение о пересчёте отделения
@@ -33,6 +33,7 @@ bool MoldCooling::refresh(const MoldDimensions& dimensions, bool circulation) {	
             diameters[i] = dimensions[i].diameter;																													// Запоминает диаметр сохранённого расчёта
         }																																							// Завершает замену истории отделения
     }																																								// Завершает обновление согласованного набора
+    configured = false;																																		// Отмечает восстановление демонстрационной постановки
     hasCirculation = circulation;																																	// Запоминает режим согласованного набора
     return changed;																																					// Сообщает изменился ли расчёт температур
 }																																									// Завершает обновление охлаждения формы
@@ -61,3 +62,20 @@ std::optional<double> MoldCooling::completedAt() const {																								
     }																																								// Завершает сравнение времён всех отделений
     return latest;																																					// Возвращает окончание затвердевания последнего отделения
 }																																									// Завершает расчёт времени затвердевания формы
+void MoldCooling::calculate(const Project& p, std::stop_token stop) {																						// Рассчитывает все отделения пользовательского проекта
+    validateProject(p);																																		// Проверяет согласованность физических исходных данных
+    MoldCooling pending;																																	// Подготавливает новый результат независимо от старого
+    for (std::size_t i = 0; i < 4; ++i) {																													// Обходит четыре отделения формы
+        const double radius = p.dimensions[i].diameter / 2000.0;																							// Переводит диаметр металла в радиус
+        const CoolingLayer layers[]{																														// Собирает слои соответствующего отделения
+            {radius, p.materials[0].conductivity, p.materials[0].density, p.materials[0].heatCapacity, p.metalTemperature, p.cells},						// Задаёт металл и его радиальную сетку
+            {p.sand[i] / 1000, p.materials[1].conductivity, p.materials[1].density, p.materials[1].heatCapacity, p.formTemperature, 16},					// Задаёт песок с индивидуальной толщиной
+            {p.flask[i] / 1000, p.materials[2].conductivity, p.materials[2].density, p.materials[2].heatCapacity, p.formTemperature, 8},					// Задаёт металлическую опоку отделения
+        };																																					// Завершает набор слоёв
+        const CoolingBoundary boundary{p.airTemperature, p.externalTransfer, p.hours * 3600, p.step, p.metalContact, p.formContact, true};					// Задаёт время и условия сопряжённого теплообмена
+        const auto motion = p.circulation ? std::optional<MeltCirculation>{{p.dimensions[i].height / 1000.0}} : std::nullopt;								// Выбирает модель циркуляции расплава
+        pending.histories[i] = solveCooling(layers, boundary, p.phase, motion, stop);																		// Решает баланс энтальпии данного отделения
+    }																																						// Завершает расчёт всех отделений
+    pending.configured = true;																																// Отмечает пользовательскую постановку
+    *this = std::move(pending);																																// Публикует только согласованный полный результат
+}																																							// Завершает расчёт пользовательского проекта

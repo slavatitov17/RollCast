@@ -96,9 +96,9 @@ void phaseStep(std::vector<double>& temperature, const std::vector<double>& cond
 }																																											// Завершает решение энтальпийного шага
 }																																											// Завершает область локальных функций
 CoolingResult solveCooling(std::span<const CoolingLayer> layers, CoolingBoundary boundary,																					// Принимает слои и настройки теплоотдачи
-    std::optional<PhaseChange> phase, std::optional<MeltCirculation> circulation) {																							// Решает одномерную задачу методом конечных объёмов
+    std::optional<PhaseChange> phase, std::optional<MeltCirculation> circulation, std::stop_token stop) {													// Решает одномерную задачу методом конечных объёмов
     if (layers.empty() || layers.front().cells < 2 || !positive(boundary.duration) || !positive(boundary.maxStep)															// Проверяет сетку и время
-        || !std::isfinite(boundary.airTemperature) || !std::isfinite(boundary.heatTransfer) || boundary.heatTransfer < 0) {													// Проверяет наружную границу
+        || !std::isfinite(boundary.airTemperature) || !std::isfinite(boundary.heatTransfer) || boundary.heatTransfer < 0 || !std::isfinite(boundary.metalContact) || boundary.metalContact < 0 || !std::isfinite(boundary.formContact) || boundary.formContact < 0) {	// Проверяет наружную границу
         throw std::invalid_argument("Invalid cooling boundary or metal grid");																								// Отклоняет некорректную постановку
     }																																										// Завершает проверку общих параметров
     if (phase && (!std::isfinite(phase->solidus) || !std::isfinite(phase->liquidus)																							// Проверяет конечность температурных границ
@@ -110,6 +110,8 @@ CoolingResult solveCooling(std::span<const CoolingLayer> layers, CoolingBoundary
     }																																										// Завершает проверку модели движения
     std::vector<Cell> grid;																																					// Хранит ячейки от оси до воздуха
     std::vector<double> temperature;																																		// Хранит исходную температуру каждой ячейки
+    std::vector<int> materialIndex;																															// Сопоставляет ячейки материалам формы
+    int layerIndex = 0;																																		// Начинает нумерацию с металлического слоя
     double radius = 0;																																						// Начинает построение сетки на оси
     for (const auto& layer : layers) {																																		// Последовательно добавляет металл и слои формы
         if (layer.cells < 1 || !positive(layer.thickness) || !positive(layer.conductivity)																					// Проверяет геометрию и теплопроводность
@@ -122,15 +124,24 @@ CoolingResult solveCooling(std::span<const CoolingLayer> layers, CoolingBoundary
             const double volume = std::numbers::pi * width * (outer + radius);																								// Вычисляет объём кольца на метр длины
             grid.push_back({radius + width / 2, outer, layer.conductivity,																									// Сохраняет геометрию и материал кольца
                             volume * layer.density * layer.heatCapacity});																									// Вычисляет теплоёмкость кольца
+            materialIndex.push_back(layerIndex);																											// Запоминает материал очередной ячейки
             temperature.push_back(layer.initialTemperature);																												// Инициализирует температуру материала
             radius = outer;																																					// Переходит к следующей радиальной грани
         }																																									// Завершает разбиение слоя
+        ++layerIndex;																																		// Переходит к следующему материалу формы
     }																																										// Завершает построение сетки слоёв
     const std::size_t count = grid.size();																																	// Учитывает все ячейки расчётной области
     std::vector<double> conductance(count + 1, 0);																															// Хранит проводимости граней включая ось
     for (std::size_t i = 1; i < count; ++i) {																																// Обходит внутренние грани сетки
         const double face = grid[i - 1].outer;																																// Берёт общий радиус между соседними ячейками
-        conductance[i] = 1 / (resistance(grid[i - 1], face) + resistance(grid[i], face));																					// Складывает два полукольцевых сопротивления
+        double contact = 0;																																	// Начинает с идеального межъячеечного контакта
+        if (materialIndex[i] != materialIndex[i - 1]) {																										// Распознаёт границу двух материалов
+            const double transfer = materialIndex[i] == 1 ? boundary.metalContact : boundary.formContact;													// Выбирает коэффициент теплообмена на контакте
+            if (transfer > 0) {																																// Включает заданное контактное сопротивление
+                contact = 1 / (circle * face * transfer);																									// Вычисляет сопротивление на метр длины
+            }																																				// Завершает проверку типа контакта
+        }																																					// Завершает обработку границы материалов
+        conductance[i] = 1 / (resistance(grid[i - 1], face) + contact + resistance(grid[i], face));															// Складывает сопротивления на общей грани
     }																																										// Завершает расчёт межъячеечных проводимостей
     if (boundary.heatTransfer > 0) {																																		// Добавляет теплоотдачу при ненулевой конвекции
         const double convection = 1 / (circle * radius * boundary.heatTransfer);																							// Вычисляет сопротивление наружного теплообмена
@@ -183,7 +194,10 @@ CoolingResult solveCooling(std::span<const CoolingLayer> layers, CoolingBoundary
                 profile[i + 1] = {grid[i].center, temperature[i]};																											// Сохраняет радиус и температуру ячейки
             }																																								// Завершает восстановление центра профиля
             profile.back() = {grid[metalEnd].outer, surface};																												// Добавляет температуру боковой стенки
-            sample.phase = summarizePhases(profile, *phase);																												// Вычисляет толщины и объёмы фазовых зон
+            sample.phase = summarizePhases(profile, *phase);																								// Вычисляет зоны и интегральные фазовые доли
+            if (boundary.recordProfile) {																													// Сохраняет профиль только для визуализации
+                sample.profile = profile;																													// Копирует температуры узлов радиальной сетки
+            }																																				// Завершает сохранение профиля
             if (!result.completedAt && sample.phase.hottestTemperature <= phase->solidus) {																					// Определяет достижение солидуса везде
                 double completion = seconds;																																// Принимает время текущего кадра
                 if (!result.samples.empty()) {																																// Уточняет время между соседними кадрами
@@ -199,7 +213,10 @@ CoolingResult solveCooling(std::span<const CoolingLayer> layers, CoolingBoundary
     };																																										// Завершает подготовку кадров расчёта
     record(0, start, start);																																				// Записывает одинаковую начальную температуру металла
     std::vector<double> right(count);																																		// Хранит правую часть линейной схемы
-    for (std::size_t step = 1; step <= steps; ++step) {																														// Продвигает решение во времени
+    for (std::size_t step = 1; step <= steps; ++step) {																										// Выполняет последовательные временные шаги
+        if (stop.stop_requested()) {																														// Проверяет отмену устаревшего фонового расчёта
+            throw std::runtime_error("Расчёт отменён");																										// Завершает работу без публикации неполной истории
+        }																																					// Завершает проверку отмены
         if (phase) {																																						// Выбирает энтальпийную схему при наличии фазового перехода
             std::fill(exchange.begin(), exchange.end(), 0);																													// Начинает с закрытых циркуляционных связей
             circulationSpeed = 0;																																			// Сбрасывает скорость для неподвижного режима

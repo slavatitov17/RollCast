@@ -5,6 +5,7 @@ struct PhaseChange {																			// Задаёт температурны�
     double solidus;																				// Задаёт температуру полного затвердевания в градусах Цельсия
     double liquidus;																			// Задаёт температуру полностью жидкого металла
     double latentHeat;																			// Задаёт скрытую теплоту в джоулях на килограмм
+    bool operator==(const PhaseChange&) const = default;																									// Сравнивает параметры фазового перехода
     double liquidShare(double temperature) const;												// Вычисляет местную объёмную долю жидкости
     double liquidSlope(double temperature) const;												// Вычисляет производную доли по температуре
 };																								// Завершает описание закона затвердевания
