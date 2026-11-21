@@ -1,5 +1,11 @@
 #include "project_io.h"	// Подключает новую схему пяти отделений
 #include "about_content.h"	// Проверяет структуру встроенного объяснения
+#include "layer_metrics.h"	// Подключает единый выбор объемов и радиальных толщин
+#ifndef NOMINMAX	// Проверяет наличие защитного оконного определения
+#define NOMINMAX	// Исключает конфликт оконных макросов со стандартными функциями
+#endif	// Завершает защиту определения макроса
+#include <windows.h>	// Сверяет UTF8 исходники со строками справки
+#include <locale>	// Обеспечивает сравнение кодировок текста справки
 #include <chrono>	// Различает временные каталоги разных проверок
 #include <cmath>	// Сравнивает геометрию и фазовые балансы
 #include <fstream>	// Проверяет записанные проекты и CSV
@@ -8,12 +14,12 @@
 namespace {	// Скрывает вспомогательные функции проверки
 void require(bool value, const char* message) {	// Останавливает тест при нарушении инварианта
     if (!value) { throw std::runtime_error(message); }	// Передаёт конкретную причину отказа
-}	// Завершает программу проверки новой ветки
+}	// Завершает текущий блок обработки
 struct Temporary {	// Управляет только собственными временными файлами
     std::filesystem::path path = std::filesystem::temp_directory_path() / ("rollcast-five-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));	// Выбирает уникальный каталог текущего теста
     Temporary() { std::filesystem::create_directory(path); }	// Создаёт изолированное место проверки
     ~Temporary() { std::error_code error; std::filesystem::remove_all(path, error); }	// Удаляет только созданный тестом каталог
-};	// Завершает управление временными документами
+};	// Завершает объявление структуры или набора данных
 void checkFiles() {	// Проверяет воспроизводимость всех новых входных данных
     Temporary files; Project p; p.autoTime = false;	// Описывает параметры текущего действия
     for (std::size_t i = 0; i < sectionCount; ++i) { p.dimensions[i] = {600 + static_cast<int>(i) * 10, 900 + static_cast<int>(i) * 20}; }	// Различает все пять пар размеров
@@ -48,7 +54,7 @@ void checkFiles() {	// Проверяет воспроизводимость в�
         require(std::abs(zones - volume) < 1e-10 && std::abs(phases - volume) < 1e-10, "CSV phase or zone balance failed");	// Проверяет оба разбиения полного объёма
         require(std::stod(fields[1]) == run.cooling.section(section).samples[rows % run.cooling.sampleCount()].seconds, "CSV time mismatch");	// Сверяет каждый момент полной истории
         ++rows;	// Учитывает проверенный температурный кадр
-    }	// Завершает проверку полной исходной геометрии
+    }	// Завершает текущий блок обработки
     require(rows == sectionCount * run.cooling.sampleCount(), "One section missing in CSV");	// Требует историю каждого из пяти отделений
     require(run.cooling.section(4).samples.back().seconds == 360, "Final partial time step missing");	// Сверяет точную длительность расчёта
     std::ofstream(path, std::ios::trunc) << "RollCast 1\n"; bool rejected = false;	// Создаёт несовместимую схему прежней ветки
@@ -57,7 +63,7 @@ void checkFiles() {	// Проверяет воспроизводимость в�
     std::ofstream(path, std::ios::trunc) << "RollCast 2\n"; rejected = false;	// Создаёт обрезанный документ новой версии
     try { loadProject(path); } catch (const std::exception&) { rejected = true; }	// Проверяет неполные входные данные
     require(rejected, "Truncated project accepted");	// Запрещает загрузку повреждённого проекта
-}	// Завершает программу проверки новой ветки
+}	// Завершает текущий блок обработки
 void checkModel() {	// Проверяет влияние реальных полей на модель
     Project p; p.autoTime = false;	// Описывает параметры текущего действия
     require(totalLength(p) == 3300 && outerDiameter(p) == 1040, "Incorrect monolithic dimensions");	// Описывает параметры текущего действия
@@ -82,7 +88,7 @@ void checkModel() {	// Проверяет влияние реальных пол
     std::stop_source stop; stop.request_stop(); bool cancelled = false;	// Создаёт отменённое фоновое задание
     try { original.calculate(p, stop.get_token()); } catch (const std::exception&) { cancelled = true; }	// Проверяет остановку до публикации новой истории
     require(cancelled && original.sampleCount() == 121, "Cancellation damaged previous result");	// Сохраняет целостность уже принятого результата
-}	// Завершает программу проверки новой ветки
+}	// Завершает текущий блок обработки
 void checkFullDefaults() {	// Проверяет полный пример на мелкой сетке
     Project p; MoldCooling result; result.calculate(p);	// Рассчитывает все входные значения со снимка
     require(result.completedAt().has_value(), "Auto did not reach full solidification");	// Требует реальное завершение всех пяти отделений
@@ -97,8 +103,8 @@ void checkFullDefaults() {	// Проверяет полный пример на 
         const auto v = phaseVolumes(p.dimensions[i], h.samples.back());	// Получает итоговые интегральные фазовые объёмы
         require(std::abs(v.solid + v.liquid - cylinderVolume(p.dimensions[i])) < 1e-9, "Fine grid phase balance failed");	// Проверяет сохранение геометрического объёма отделения
         std::cout << "Section " << i + 1 << " energy " << h.relativeEnergyError << " final axis/wall " << h.samples.back().axisTemperature << ' ' << h.samples.back().surfaceTemperature << '\n';	// Показывает независимые показатели полного примера
-    }	// Завершает проверку полной исходной геометрии
-}	// Завершает программу проверки новой ветки
+    }	// Завершает текущий блок обработки
+}	// Завершает текущий блок обработки
 void checkTimeModes() {	// Проверяет независимое поведение двух режимов времени
     Project p; p.autoTime = false; p.hours = 20; p.step = 120; p.diameterStep = 20;	// Создает быстрый длинный фиксированный расчет
     MoldCooling fixed; fixed.calculate(p);	// Рассчитывает весь заданный числовой горизонт
@@ -110,17 +116,50 @@ void checkTimeModes() {	// Проверяет независимое повед�
     bool rejected = false;	// Отслеживает явное сообщение о недостижимом завершении
     try { fixed.calculate(p); } catch (const std::exception&) { rejected = true; }	// Проверяет ограничение бесконечного автоматического поиска
     require(rejected && fixed.section(4).samples.back().seconds == 20*3600, "Auto failure damaged prior history");	// Сохраняет предыдущую историю при неудачном поиске
-}	// Завершает программу проверки новой ветки
+}	// Завершает текущий блок обработки
+void checkLayerMetrics() {	// Проверяет совместное хранение объема и толщины
+    const SectionDimensions dimensions{500, 1000}; CoolingSample sample{};	// Создает цилиндр радиусом двести пятьдесят миллиметров
+    sample.phase.zones[0].volumeShare = 0.36; sample.phase.zones[0].thickness = 0.05;	// Задает наружную твердую оболочку
+    sample.phase.zones[1].volumeShare = 0.48; sample.phase.zones[1].thickness = 0.10;	// Задает промежуточный двухфазный слой
+    sample.phase.zones[2].volumeShare = 0.16; sample.phase.zones[2].thickness = 0.10;	// Задает внутреннее жидкое ядро
+    const double volume = cylinderVolume(dimensions);	// Получает эталонный геометрический объем
+    double volumes = 0, thicknesses = 0;	// Суммирует оба независимых набора показателей
+    for (std::size_t z = 0; z < 3; ++z) { volumes += layerValue(dimensions, sample, z, LayerMetric::volume); thicknesses += layerValue(dimensions, sample, z, LayerMetric::thickness); }	// Не изменяет исходный температурный кадр
+    require(std::abs(volumes - volume) < 1e-12 && std::abs(thicknesses - 250) < 1e-12, "Layer metrics violate cylinder geometry");	// Проверяет объем и сумму радиальных толщин
+    require(std::abs(layerValue(dimensions,sample,0,LayerMetric::volume) - 0.36*volume) < 1e-12 && layerValue(dimensions,sample,0,LayerMetric::thickness) == 50, "Volume and thickness were confused");	// Исключает подмену толщины объемной долей
+    require(layerValue(dimensions,sample,2,LayerMetric::thickness,true,0) == 0 && layerValue(dimensions,sample,2,LayerMetric::thickness,true,0.5) == 250, "Filling radial thickness failed");	// Отличает пустой участок от заполненной радиальной области
+    require(std::abs(layerValue(dimensions,sample,2,LayerMetric::volume,true,0.5)-volume/2)<1e-12, "Filling volume failed");	// Учитывает осевое заполнение при вычислении объема
+}	// Завершает текущий блок обработки
 void checkExplanation() {	// Проверяет наличие раскрываемой пользователю теории
     const auto theory = aboutContent(true);	// Получает раздел расчётов без интерфейса Windows
     require(!theory.empty() && theory.front().text == L"Ограничения", "Theory must start with limitations");	// Делает допущения первым разделом справки
     int formulas = 0, snippets = 0;	// Считает математические и программные объяснения
-    for (const auto& block : theory) { formulas += block.kind == HelpKind::formula; snippets += block.kind == HelpKind::code; }	// Проверяет состав последовательного доклада
+    const auto convert = [](const std::string& value) {	// Преобразует русский исходник в формат строки справки
+        const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);	// Вычисляет размер проверяемой строки UTF16
+        std::wstring result(size, 0); MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), result.data(), size);	// Сохраняет точные символы исходного комментария
+        return result;	// Возвращает строку для побуквенного сравнения
+    };	// Завершает преобразование кодировки
+    for (std::size_t i = 0; i < theory.size(); ++i) {	// Проверяет каждую формулу и программный фрагмент
+        const auto& block = theory[i]; formulas += block.kind == HelpKind::formula; snippets += block.kind == HelpKind::code;	// Настраивает отображение текущего элемента
+        if (block.kind == HelpKind::formula) { require(block.text.find(L'/') == std::wstring::npos, "Formula contains slash division"); }	// Требует структурное оформление каждой дроби
+        if (block.kind != HelpKind::code) { continue; }	// Проверяет происхождение только программных блоков
+        require(!block.source.empty() && block.firstLine > 0 && i > 0 && theory[i-1].kind == HelpKind::paragraph, "Code attribution missing");	// Требует файл строку и плавный переход
+        const auto root = std::filesystem::path(__FILE__).parent_path().parent_path();	// Находит исходники независимо от каталога запуска
+        std::ifstream source(root / block.source); require(source.good(), "Attributed source unavailable");	// Открывает объявленный файл происхождения
+        std::string line; for (int n = 1; n < block.firstLine; ++n) { std::getline(source, line); }	// Достигает фактического номера начала фрагмента
+        std::wistringstream shown(block.text); std::wstring row; int number = block.firstLine;	// Разбирает показанные номера и исходный текст
+        while (std::getline(shown, row)) {	// Сверяет все строки включая русские комментарии
+            require(static_cast<bool>(std::getline(source, line)), "Snippet exceeds source file");	// Исключает несуществующие номера строк
+            if (!line.empty() && line.back() == '\r') { line.pop_back(); }	// Учитывает окончания строк Windows
+            const auto prefix = std::to_wstring(number++) + L"\t";	// Восстанавливает подпись номера с табуляцией
+            require(row == prefix + convert(line) && row.find(L"//") != std::wstring::npos, "Snippet text or line number is stale");	// Не допускает устаревший код и скрытые комментарии
+        }	// Завершает текущий блок обработки
+    }	// Завершает текущий блок обработки
     require(formulas >= 15 && snippets >= 7, "Theory or code explanation missing");	// Требует теорию вместе с привязкой к реализации
-}	// Завершает программу проверки новой ветки
-}	// Завершает программу проверки новой ветки
+}	// Завершает текущий блок обработки
+}	// Завершает текущий блок обработки
 int main() {	// Запускает контроль новой предметной модели
-    try { checkFiles(); checkModel(); checkFullDefaults(); checkTimeModes(); checkExplanation(); }	// Описывает параметры текущего действия
+    try { checkFiles(); checkModel(); checkFullDefaults(); checkTimeModes(); checkLayerMetrics(); checkExplanation(); }	// Настраивает отображение текущего элемента
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }	// Сообщает причину отказа в CTest
     std::cout << "Five sections, files, coating, mesh and explanation passed\n"; return 0;	// Подтверждает успешный результат всех проверок
-}	// Завершает программу проверки новой ветки
+}	// Завершает текущий блок обработки

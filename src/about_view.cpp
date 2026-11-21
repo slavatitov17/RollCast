@@ -1,11 +1,45 @@
 #include "about_view.h"	// Подключает интерфейс модального окна объяснений
 #include "about_content.h"	// Подключает концепцию формулы и фрагменты кода
+#include "formula_view.h"	// Подключает векторные формулы со структурными дробями
 #include <commctrl.h>	// Предоставляет вкладки общей и расчетной справки
 #include <richedit.h>	// Предоставляет форматированный текст с прокруткой
+#include <richole.h>	// Определяет хранение встроенных векторных объектов RichEdit
+#include <ole2.h>	// Подключает отображение встроенных векторных объектов RichEdit
 #include <algorithm>	// Ограничивает размеры и длину чтения
 #include <cstring>	// Копирует очередную часть RTF
 #include <stdexcept>	// Передает ошибки создания справочного окна
 namespace {	// Ограничивает видимость реализации справки
+struct OleScope {	// Ограничивает инициализацию встроенных объектов временем справки
+    OleScope() { if (FAILED(OleInitialize(nullptr))) { throw std::runtime_error("Недоступны встроенные формулы"); } }	// Разрешает RichEdit отображать векторные математические объекты
+    ~OleScope() { OleUninitialize(); }	// Освобождает ресурсы встроенных объектов текущего потока
+};	// Завершает объявление структуры или набора данных
+class PictureStorage final : public IRichEditOleCallback {	// Предоставляет RichEdit хранилище для встроенных формул
+    LONG references = 1;	// Управляет временем жизни обратного вызова
+public:	// Настраивает отображение текущего элемента
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** result) override {	// Предоставляет стандартные интерфейсы встроенных объектов
+        if (!result) { return E_POINTER; }	// Проверяет адрес возвращаемого интерфейса
+        *result = nullptr;	// Исключает возврат неинициализированного указателя
+        if (IsEqualIID(id, IID_IUnknown) || IsEqualIID(id, IID_IRichEditOleCallback)) { *result = static_cast<IRichEditOleCallback*>(this); AddRef(); return S_OK; }	// Разрешает поддерживаемые интерфейсы управления объектами
+        return E_NOINTERFACE;	// Отклоняет неподдерживаемый интерфейс
+    }	// Завершает текущий блок обработки
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&references); }	// Сохраняет объект пока он используется редактором
+    ULONG STDMETHODCALLTYPE Release() override { const LONG remaining = InterlockedDecrement(&references); if (!remaining) { delete this; } return remaining; }	// Освобождает объект после закрытия редактора
+    HRESULT STDMETHODCALLTYPE GetNewStorage(LPSTORAGE* storage) override {	// Выделяет хранилище отдельной математической формулы
+        ILockBytes* bytes = nullptr; const HRESULT created = CreateILockBytesOnHGlobal(nullptr, TRUE, &bytes);	// Создает память без временного файла
+        if (FAILED(created)) { return created; }	// Передает ошибку выделения хранилища
+        const HRESULT result = StgCreateDocfileOnILockBytes(bytes, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, storage);	// Предоставляет объекту структурированное хранилище
+        bytes->Release(); return result;	// Передает владение хранилищем встроенному объекту
+    }	// Завершает текущий блок обработки
+    HRESULT STDMETHODCALLTYPE GetInPlaceContext(LPOLEINPLACEFRAME*, LPOLEINPLACEUIWINDOW*, LPOLEINPLACEFRAMEINFO) override { return E_NOTIMPL; }	// Не активирует редактирование статичных математических объектов
+    HRESULT STDMETHODCALLTYPE ShowContainerUI(BOOL) override { return S_OK; }	// Сохраняет обычный интерфейс справки
+    HRESULT STDMETHODCALLTYPE QueryInsertObject(LPCLSID, LPSTORAGE, LONG) override { return S_OK; }	// Разрешает вставку собственных математических объектов
+    HRESULT STDMETHODCALLTYPE DeleteObject(LPOLEOBJECT) override { return S_OK; }	// Разрешает освобождение объектов при смене раздела
+    HRESULT STDMETHODCALLTYPE QueryAcceptData(LPDATAOBJECT, CLIPFORMAT*, DWORD, BOOL, HGLOBAL) override { return S_OK; }	// Принимает данные встроенного документа справки
+    HRESULT STDMETHODCALLTYPE ContextSensitiveHelp(BOOL) override { return E_NOTIMPL; }	// Не запускает стороннюю контекстную справку
+    HRESULT STDMETHODCALLTYPE GetClipboardData(CHARRANGE*, DWORD, LPDATAOBJECT*) override { return E_NOTIMPL; }	// Оставляет стандартную обработку копирования текста
+    HRESULT STDMETHODCALLTYPE GetDragDropEffect(BOOL, DWORD, LPDWORD effect) override { if (effect) { *effect = DROPEFFECT_NONE; } return S_OK; }	// Не разрешает перетаскивание объектов в справку
+    HRESULT STDMETHODCALLTYPE GetContextMenu(WORD, LPOLEOBJECT, CHARRANGE*, HMENU* menu) override { if (menu) { *menu = nullptr; } return E_NOTIMPL; }	// Не создает меню редактирования встроенных формул
+};	// Завершает объявление структуры или набора данных
 struct AboutState { HWND tabs{}; HWND document{}; bool closed = false; };	// Хранит элементы и состояние модального окна
 struct Stream { const std::string& data; std::size_t position = 0; };	// Передает документ в RichEdit без файлов
 std::string rtfEscape(const std::wstring& text) {	// Преобразует русский текст в переносимый RTF
@@ -13,12 +47,13 @@ std::string rtfEscape(const std::wstring& text) {	// Преобразует ру
     for (const wchar_t c : text) {	// Обрабатывает каждый символ UTF-16
         if (c == L'\\' || c == L'{' || c == L'}') { value += '\\'; value += static_cast<char>(c); }	// Экранирует управляющие символы формата
         else if (c == L'\n') { value += "\\line "; }	// Сохраняет перенос строки внутри фрагмента кода
+        else if (c == L'\t') { value += "\\tab "; }	// Отделяет номер строки и код табуляцией
         else if (c >= 32 && c < 127) { value += static_cast<char>(c); }	// Копирует обычный латинский символ
         else { value += "\\u" + std::to_string(static_cast<short>(c)) + "?"; }	// Сохраняет кириллицу и математические знаки
     }	// Завершает текущий блок обработки
     return value;	// Возвращает безопасный текст RTF
 }	// Завершает текущий блок обработки
-std::string document(bool calculations) {	// Создает типографически различимые элементы справки
+std::string document(bool calculations, int width) {	// Настраивает отображение текущего элемента
     std::string rtf = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}{\\f1 Cambria Math;}{\\f2 Consolas;}}{\\colortbl;\\red25\\green42\\blue55;\\red26\\green78\\blue115;\\red243\\green246\\blue248;}\\viewkind4\\uc1 ";	// Настраивает шрифты и сдержанные цвета
     int equation = 0;	// Нумерует формулы последовательно внутри расчетной вкладки
     for (const auto& block : aboutContent(calculations)) {	// Выводит материал в заданном порядке
@@ -26,8 +61,8 @@ std::string document(bool calculations) {	// Создает типографич
         switch (block.kind) {	// Выбирает оформление по роли текста
         case HelpKind::heading: rtf += "\\pard\\ql\\sb260\\sa120\\f0\\fs30\\b\\cf2 " + text + "\\b0\\par "; break;	// Выделяет заголовки разделов и подразделов
         case HelpKind::paragraph: rtf += "\\pard\\ql\\sb20\\sa150\\sl300\\slmult1\\f0\\fs23\\cf1 " + text + "\\par "; break;	// Обеспечивает читаемый основной русский текст
-        case HelpKind::formula: rtf += "\\pard\\qc\\sb170\\sa200\\f1\\fs28\\i\\cf1 " + text + "    (" + std::to_string(++equation) + ")\\i0\\par "; break;	// Центрирует курсивную формулу с ее номером
-        case HelpKind::code: rtf += "\\pard\\ql\\li180\\ri100\\sb90\\sa180\\f2\\fs21\\highlight3\\cf1 " + text + "\\highlight0\\par "; break;	// Отделяет код моноширинным шрифтом и фоном
+        case HelpKind::formula: rtf += "\\pard\\qc\\sb170\\sa200 " + formulaRtf(block.text, ++equation, width) + "\\par "; break;	// Рисует вертикальные дроби вместо косых черт
+        case HelpKind::code: rtf += "\\pard\\ql\\sb100\\sa40\\f0\\fs21\\cf2 " + rtfEscape(L"Файл: " + block.source) + "\\par "; rtf += "\\pard\\ql\\li180\\ri100\\sb90\\sa180\\tx720\\tx1440\\f2\\fs19\\highlight3\\cf1 " + text + "\\highlight0\\par "; break;	// Настраивает отображение текущего элемента
         }	// Завершает текущий блок обработки
     }	// Завершает текущий блок обработки
     return rtf + "}";	// Закрывает корректный документ RTF
@@ -39,7 +74,8 @@ DWORD CALLBACK readStream(DWORD_PTR cookie, LPBYTE buffer, LONG length, LONG* re
     stream.position += count; *read = static_cast<LONG>(count); return 0;	// Продвигает поток и сообщает число байтов
 }	// Завершает текущий блок обработки
 void loadDocument(AboutState& state) {	// Показывает выбранную вкладку начиная с ее заголовка
-    const auto rtf = document(TabCtrl_GetCurSel(state.tabs) == 1);	// Выбирает общие сведения либо расчетную теорию
+    RECT bounds{}; GetClientRect(state.document, &bounds);	// Подбирает ширину формул под размер окна
+    const auto rtf = document(TabCtrl_GetCurSel(state.tabs) == 1, std::max(300L, bounds.right - 55));	// Настраивает отображение текущего элемента
     Stream input{rtf}; EDITSTREAM stream{};	// Подготавливает синхронный поток форматированного текста
     stream.dwCookie = reinterpret_cast<DWORD_PTR>(&input); stream.pfnCallback = readStream;	// Связывает RichEdit с локальным источником
     SendMessageW(state.document, WM_SETREDRAW, FALSE, 0);	// Предотвращает мерцание при замене вкладки
@@ -68,6 +104,10 @@ LRESULT CALLBACK aboutProcedure(HWND window, UINT message, WPARAM wParam, LPARAM
             for (const auto* title : {L"Общее", L"Расчеты"}) { TCITEMW item{}; item.mask = TCIF_TEXT; item.pszText = const_cast<wchar_t*>(title); TabCtrl_InsertItem(state->tabs, TabCtrl_GetItemCount(state->tabs), &item); }	// Добавляет обе требуемые вкладки
             state->document = CreateWindowExW(WS_EX_CLIENTEDGE, L"RICHEDIT50W", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(3), nullptr, nullptr);	// Разрешает чтение выделение и вертикальную прокрутку
             if (!state->tabs || !state->document) { return -1; }	// Отказывается от неполностью созданной справки
+            auto* storage = new PictureStorage;	// Подготавливает хранилище векторных изображений
+            const auto accepted = SendMessageW(state->document, EM_SETOLECALLBACK, 0, reinterpret_cast<LPARAM>(storage));	// Разрешает RichEdit принимать формулы из RTF
+            storage->Release();	// Передает управление временем жизни редактору
+            if (!accepted) { throw std::runtime_error("Недоступно хранилище формул"); }	// Не открывает справку с пустыми формулами
             SendMessageW(state->document, EM_SETBKGNDCOLOR, 0, RGB(255, 255, 255));	// Сохраняет белый фон чтения
             SendMessageW(state->document, EM_EXLIMITTEXT, 0, 1000000);	// Размещает развернутое объяснение целиком
             SendMessageW(state->document, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(18, 18));	// Отделяет текст от краев документа
@@ -75,7 +115,11 @@ LRESULT CALLBACK aboutProcedure(HWND window, UINT message, WPARAM wParam, LPARAM
             for (const HWND child : {state->tabs, close}) { SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE); }	// Согласует шрифт элементов управления
             arrange(window, *state); loadDocument(*state); return 0;	// Показывает концепцию первой вкладкой
         }	// Завершает текущий блок обработки
-        case WM_SIZE: arrange(window, *state); return 0;	// Сохраняет прокрутку и кнопки при изменении размеров
+        case WM_SIZE: {	// Вписывает дроби при изменении ширины справки
+            POINT scroll{}; SendMessageW(state->document, EM_GETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scroll));	// Запоминает текущую позицию чтения
+            arrange(window, *state); loadDocument(*state);	// Перестраивает формулы для новой ширины
+            SendMessageW(state->document, EM_SETSCROLLPOS, 0, reinterpret_cast<LPARAM>(&scroll)); return 0;	// Возвращает читателя к прежнему месту
+        }	// Завершает текущий блок обработки
         case WM_GETMINMAXINFO: reinterpret_cast<MINMAXINFO*>(lParam)->ptMinTrackSize = {760, 540}; return 0;	// Сохраняет читаемую минимальную область документа
         case WM_NOTIFY: if (reinterpret_cast<NMHDR*>(lParam)->idFrom == 1 && reinterpret_cast<NMHDR*>(lParam)->code == TCN_SELCHANGE) { loadDocument(*state); } return 0;	// Меняет содержимое только при выборе вкладки
         case WM_COMMAND: if (LOWORD(wParam) == 2 || LOWORD(wParam) == IDCANCEL) { DestroyWindow(window); } return 0;	// Закрывает справку кнопкой либо Escape
@@ -88,6 +132,7 @@ LRESULT CALLBACK aboutProcedure(HWND window, UINT message, WPARAM wParam, LPARAM
 }	// Завершает текущий блок обработки
 }	// Завершает текущий блок обработки
 void showAbout(HWND owner) {	// Показывает объяснение поверх затемненного рабочего экрана
+    OleScope objects;	// Подготавливает отображение формул перед созданием RichEdit
     const auto library = LoadLibraryW(L"Msftedit.dll");	// Подключает штатный форматированный редактор Windows
     if (!library) { throw std::runtime_error("Недоступен системный компонент RichEdit"); }	// Объясняет недоступность встроенной справки
     const HINSTANCE instance = GetModuleHandleW(nullptr);	// Получает экземпляр текущей программы

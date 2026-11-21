@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.20)																											# Задаёт минимальную версию CMake
 project(RollCast LANGUAGES CXX)																													# Объявляет проект на C++
-add_executable(RollCast WIN32 src/main.cpp src/about_content.cpp src/about_view.cpp src/mold_view.cpp src/cooling.cpp src/cooling_view.cpp src/phase_change.cpp src/mold_cooling.cpp src/project.cpp src/project_io.cpp)	# Собирает окно и модуль статического разреза
+add_executable(RollCast WIN32 src/main.cpp src/formula_view.cpp src/about_content.cpp src/about_view.cpp src/mold_view.cpp src/cooling.cpp src/cooling_view.cpp src/phase_change.cpp src/mold_cooling.cpp src/project.cpp src/project_io.cpp)	# Собирает окно и модуль статического разреза
 set_target_properties(RollCast PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<1:${PROJECT_SOURCE_DIR}>")												# Записывает exe в корень при любой конфигурации
 target_compile_features(RollCast PRIVATE cxx_std_20)																							# Включает стандарт C++20 для приложения
 target_compile_definitions(RollCast PRIVATE UNICODE)																							# Выбирает Unicode для системных идентификаторов Win32
-target_link_libraries(RollCast PRIVATE user32 gdi32 comctl32 comdlg32 gdiplus)																				# Подключает оконные функции кисти и системный ползунок
+target_link_libraries(RollCast PRIVATE user32 gdi32 comctl32 comdlg32 gdiplus ole32 uuid)																				# Подключает оконные функции кисти и системный ползунок
 if(MINGW)																																		# Выбирает параметры компоновки для MinGW-w64
     target_link_options(RollCast PRIVATE -municode -static)																						# Выбирает вход Unicode и встраивает библиотеки компилятора
 elseif(MSVC)																																	# Выбирает параметры для компилятора Microsoft

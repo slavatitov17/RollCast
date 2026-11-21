@@ -55,14 +55,11 @@ struct Surface {	// Хранит повторно используемый бу�
 struct Completed {	// Передает результат из фонового потока
     unsigned long long generation;	// Различает актуальные и отмененные задания
     std::shared_ptr<Run> result;	// Хранит опубликованный неизменяемый результат
-    std::shared_ptr<Run> baseline;	// Хранит закрепленный результат сравнения
     std::wstring error;	// Передает диагностическое сообщение
 };	// Завершает объявление структуры или набора данных
 struct AppState {	// Хранит состояние оконного приложения
     Project inputs;	// Хранит последний принятый набор исходных данных
     std::shared_ptr<Run> result;	// Хранит опубликованный неизменяемый результат
-    std::shared_ptr<Run> baseline;	// Хранит закрепленный результат сравнения
-    std::optional<Project> baselineInputs;	// Позволяет восстановить базу после перезапуска
     std::jthread worker;	// Управляет отменяемым фоновым расчетом
     unsigned long long generation = 0;	// Нумерует расчетные задания
     bool running = false;	// Отмечает выполнение фоновой работы
@@ -75,6 +72,8 @@ struct AppState {	// Хранит состояние оконного прило
     bool automatic = false;	// Управляет автоматической анимацией заполнения
     bool started = false;	// Отличает пустой запуск от воспроизведения
     int zoom = 100;	// Хранит масштаб объема без смещения графика
+    LayerMetric metric = LayerMetric::volume;	// Выбирает отображаемый показатель без изменения истории
+    unsigned layers = 7;	// Хранит независимый выбор трех слоев
     Project preview;	// Хранит проверенную геометрию предварительного просмотра
     std::array<std::vector<HWND>, 3> groups;	// Описывает параметры текущего действия
     ChartCache curves;	// Кэширует компактные температурные линии
@@ -85,7 +84,7 @@ struct AppState {	// Хранит состояние оконного прило
     POINT cursor{};	// Хранит положение подписи
     bool tracking = false;	// Отслеживает уход мыши со схемы
     Surface buffer;	// Переиспользует графический буфер окна
-    std::filesystem::path directory;	// Хранит каталог программы и локальной базы
+    std::filesystem::path directory;	// Хранит исходный каталог файловых диалогов
     std::filesystem::path filename;	// Хранит путь последнего файла проекта
 };	// Завершает объявление структуры или набора данных
 std::wstring wide(const std::string& text) {	// Преобразует UTF-8 в строки Windows
@@ -151,7 +150,7 @@ Project readProject(HWND window, const AppState& state) {	// Читает обе
 }	// Завершает текущий блок обработки
 void updateDerived(HWND window, AppState& state) {	// Обновляет только геометрические производные поля
     const bool changing = state.changing; state.changing = true;	// Исключает повторные события служебных полей
-    try {	// Восстанавливает только корректные исходные данные базы
+    try {	// Обрабатывает операцию с контролем возможных ошибок
         const auto p = readProject(window, state); state.preview = p; state.rebuildMold = true; wchar_t value[80]{};	// Описывает параметры текущего действия
         std::swprintf(value, std::size(value), L"%.6g", outerDiameter(p)); SetDlgItemTextW(window, 210, value);	// Показывает вычисленный наружный диаметр D0
         std::swprintf(value, std::size(value), L"%.6g", totalLength(p)); SetDlgItemTextW(window, 211, value);	// Показывает сумму осевых размеров L0
@@ -178,11 +177,11 @@ void createControls(HWND window, AppState& state) {	// Создает компа
     control(window, L"BUTTON", L"Сохранить в .roll", BS_PUSHBUTTON | WS_TABSTOP, 16, 10, 155, 31, 3);	// Ставит сохранение проекта первым действием
     control(window, L"BUTTON", L"Сохранить в .csv", BS_PUSHBUTTON | WS_TABSTOP, 181, 10, 155, 31, 4);	// Ставит выгрузку истории вторым действием
     control(window, L"BUTTON", L"Открыть из файла", BS_PUSHBUTTON | WS_TABSTOP, 346, 10, 155, 31, 2);	// Добавляет загрузку входов без автоматического расчета
-    control(window, L"BUTTON", L"Закрепить базу", BS_PUSHBUTTON | WS_TABSTOP, 511, 10, 160, 31, 5);	// Сохраняет сравнение с рассчитанным проектом
     control(window, L"BUTTON", L"О программе", BS_PUSHBUTTON | WS_TABSTOP, 0, 10, 130, 31, 6);	// Создает правую кнопку встроенной справки
     control(window, L"BUTTON", L"Рассчитать", BS_PUSHBUTTON | WS_TABSTOP, 28, 0, 336, 34, 1);	// Закрепляет расчет внизу панели параметров
     control(window, L"BUTTON", L"Остановить", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 260, 30, 7);	// Создает доступную во время воспроизведения остановку
-    const HWND tabs = control(window, WC_TABCONTROLW, L"", WS_TABSTOP, 24, 92, 278, 24, tabsId);	// Описывает параметры текущего действия
+    const HWND tabs = control(window, WC_TABCONTROLW, L"", WS_TABSTOP | TCS_FIXEDWIDTH | TCS_BUTTONS | TCS_FLATBUTTONS, 24, 92, 278, 26, tabsId);	// Настраивает отображение текущего элемента
+    TabCtrl_SetItemSize(tabs, 92, 26);	// Растягивает три раздела на всю ширину панели
     const wchar_t* titles[]{L"Геометрия", L"Материалы", L"Условия"};	// Описывает параметры текущего действия
     for (int i = 0; i < 3; ++i) { TCITEMW item{}; item.mask = TCIF_TEXT; item.pszText = const_cast<wchar_t*>(titles[i]); TabCtrl_InsertItem(tabs, i, &item); }	// Описывает параметры текущего действия
     groupControl(window, state, 0, L"STATIC", L"Диаметры, мм", 28, 135, 125, 20);	// Описывает параметры текущего действия
@@ -205,11 +204,11 @@ void createControls(HWND window, AppState& state) {	// Создает компа
     }	// Завершает текущий блок обработки
     const wchar_t* settings[]{L"Общее время, мин", L"Шаг по времени, с", L"Шаг по диаметру, мм"};	// Оставляет действующие настройки численной модели
     for (int i = 0; i < 3; ++i) {	// Рисует три обозначения вне белой области
-        groupControl(window, state, 2, L"STATIC", settings[i], 28, 143 + i * 34, 155, 24);	// Описывает параметры текущего действия
-        groupControl(window, state, 2, L"EDIT", L"", 182, 139 + i * 34, i == 0 ? 65 : 105, 24, firstNumber + 16 + i);	// Описывает параметры текущего действия
+        groupControl(window, state, 2, L"STATIC", settings[i], 28, (i == 0 ? 143 : 249 + (i - 1) * 34), 155, 24);	// Настраивает отображение текущего элемента
+        groupControl(window, state, 2, L"EDIT", L"", 182, (i == 0 ? 139 : 245 + (i - 1) * 34), i == 0 ? 65 : 105, 24, firstNumber + 16 + i);	// Настраивает отображение текущего элемента
     }	// Завершает текущий блок обработки
     state.groups[2].push_back(control(window, L"BUTTON", L"Авто", BS_PUSHBUTTON | WS_TABSTOP, 251, 139, 46, 24, 8));	// Возвращает автоматический поиск одним нажатием
-    groupControl(window, state, 2, L"STATIC", L"При выборе «Авто» время расчета\nостановится в момент полного\nзатвердевания", 28, 255, 268, 65);	// Описывает параметры текущего действия
+    groupControl(window, state, 2, L"STATIC", L"При выборе «Авто» расчет\nостановится в момент полного\nзатвердевания всех участков", 28, 172, 268, 63);	// Настраивает отображение текущего элемента
     int row = 134;	// Размещает компактные группы свойств вертикально
     const auto heading = [&](const wchar_t* name) { groupControl(window, state, 1, L"STATIC", name, 28, row, 260, 20); row += 23; };	// Создает название очередного материала
     const auto field = [&](const wchar_t* name, int number) { groupControl(window, state, 1, L"STATIC", name, 28, row + 3, 185, 20); groupControl(window, state, 1, L"EDIT", L"", 215, row, 78, 22, firstNumber + number); row += 23; };	// Связывает подпись с соответствующим параметром
@@ -224,15 +223,21 @@ void createControls(HWND window, AppState& state) {	// Создает компа
     control(window, TRACKBAR_CLASSW, L"", TBS_NOTICKS | WS_TABSTOP, 0, 0, 100, 25, sliderId);	// Создает общую круглую временную ручку
     SendDlgItemMessageW(window, sliderId, TBM_SETRANGE, TRUE, MAKELPARAM(0, timelineEnd));	// Сохраняет разрешение общей шкалы
     control(window, L"STATIC", L"00:00:00", 0, 0, 0, 85, 22, clockId);	// Оставляет нулевое время до расчета
-    control(window, L"STATIC", L"Выбранное отделение", 0, 0, 0, 160, 22, 208);	// Объясняет назначение списка графиков
+    control(window, L"STATIC", L"Участок", 0, 0, 0, 160, 22, 208);	// Настраивает отображение текущего элемента
     const HWND picker = control(window, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0, 0, 250, 180, chartPicker);	// Предлагает только одно отделение за раз
-    for (const auto* name : sectionNames) { SendMessageW(picker, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name)); }	// Связывает пункты с номерами на форме
+    for (const auto* name : areaNumbers) { SendMessageW(picker, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name)); }	// Настраивает отображение текущего элемента
     SendMessageW(picker, CB_SETCURSEL, 0, 0);	// Выбирает прибыль по умолчанию
     control(window, L"BUTTON", L"Выгрузить", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 105, 28, firstExport);	// Возвращает стандартную текстовую кнопку выгрузки
     control(window, L"STATIC", L"", 0, 0, 0, 80, 22, 209);	// Показывает правую границу только числового горизонта
     control(window, L"BUTTON", L"-", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 25, 25, 301);	// Уменьшает масштаб вертикальной оси
     control(window, L"EDIT", L"100%", ES_CENTER | ES_AUTOHSCROLL | WS_TABSTOP, 0, 0, 55, 25, 302);	// Позволяет ввести точный масштаб объема
     control(window, L"BUTTON", L"+", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 25, 25, 303);	// Увеличивает масштаб вертикальной оси
+    control(window, L"STATIC", L"Показатель", 0, 0, 0, 80, 22, 306);	// Подписывает общий выбор объема или толщины
+    const HWND metric = control(window, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, 0, 0, 130, 100, 304);	// Создает переключатель показателя готовых данных
+    for (const auto* name : {L"Объем, м3", L"Толщина, мм"}) { SendMessageW(metric, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name)); }	// Предлагает две согласованные системы единиц
+    SendMessageW(metric, CB_SETCURSEL, 0, 0);	// Начинает с объемов слоев
+    control(window, L"STATIC", L"Слой", 0, 0, 0, 40, 22, 307);	// Подписывает независимый выбор кривых
+    control(window, L"BUTTON", L"Все ▾", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 100, 24, 305);	// Открывает список с несколькими отмеченными слоями
     showTab(state, 0); writeProject(window, state, state.inputs);	// Заполняет исходные поля без запуска вычислений
 }	// Завершает текущий блок обработки
 std::size_t frameIndex(const AppState& state) {	// Сопоставляет ползунок кадру охлаждения
@@ -247,7 +252,8 @@ void arrange(HWND window, AppState& state) {	// Размещает постоя�
     const auto areas = layout(window, state.started);	// Описывает параметры текущего действия
     MoveWindow(GetDlgItem(window, 1), 28, areas.client.bottom - 92, 270, 30, TRUE);	// Описывает параметры текущего действия
     MoveWindow(GetDlgItem(window, 7), 28, areas.client.bottom - 56, 270, 30, TRUE);	// Ставит остановку под запуском
-    EnableWindow(GetDlgItem(window, 7), state.automatic);	// Разрешает остановку только активного воспроизведения
+    EnableWindow(GetDlgItem(window, 7), state.started && state.position < timelineEnd);	// Разрешает остановку и продолжение до конца истории
+    SetDlgItemTextW(window, 7, state.started && !state.automatic && state.position < timelineEnd ? L"Продолжить расчет" : L"Остановить");	// Меняет действие после приостановки
     for (int id : {sliderId, clockId, 209}) { ShowWindow(GetDlgItem(window, id), state.started ? SW_SHOW : SW_HIDE); }	// Скрывает шкалу до первого расчета
     MoveWindow(GetDlgItem(window, 6), areas.client.right - 146, 10, 130, 31, TRUE);	// Выравнивает справку по правому краю окна
     MoveWindow(GetDlgItem(window, sliderId), areas.mold.left + 88, areas.client.bottom - 78, areas.mold.right - areas.mold.left - (state.inputs.autoTime ? 92 : 165), 26, TRUE);	// Описывает параметры текущего действия
@@ -257,20 +263,22 @@ void arrange(HWND window, AppState& state) {	// Размещает постоя�
     wchar_t endTime[32]{}; const auto endSeconds = static_cast<long long>(state.inputs.hours * 3600);	// Переводит заданный горизонт в секунды
     std::swprintf(endTime, std::size(endTime), L"%02lld:%02lld:%02lld", endSeconds / 3600, endSeconds / 60 % 60, endSeconds % 60);	// Форматирует правую метку времени
     SetDlgItemTextW(window, 209, endTime);	// Показывает горизонт без условного времени заливки
-    MoveWindow(GetDlgItem(window, 208), areas.results.left + 12, areas.results.top + 224, 158, 22, TRUE);	// Подписывает выбор конкретного отделения
-    MoveWindow(GetDlgItem(window, chartPicker), areas.results.left + 175, areas.results.top + 218, areas.results.right - areas.results.left - 190, 180, TRUE);	// Размещает список под сводной таблицей
     const auto card = chartAreas(areas.results, state.selection)[state.selection];	// Находит карточку единственного выбранного графика
-    MoveWindow(GetDlgItem(window, firstExport), card.right - 116, card.top + 36, 105, 28, TRUE);	// Описывает параметры текущего действия
-    const int center = (card.left + card.right) / 2;	// Центрирует управление масштабом в карточке
-    MoveWindow(GetDlgItem(window, 301), center - 58, card.top + 36, 25, 24, TRUE);	// Ставит уменьшение слева от масштаба
-    MoveWindow(GetDlgItem(window, 302), center - 29, card.top + 36, 58, 24, TRUE);	// Ставит ввод масштаба по центру
-    MoveWindow(GetDlgItem(window, 303), center + 33, card.top + 36, 25, 24, TRUE);	// Ставит увеличение справа от масштаба
+    MoveWindow(GetDlgItem(window, 306), areas.results.left + 12, areas.results.top + 13, 76, 22, TRUE);	// Ставит показатель над таблицей слева
+    MoveWindow(GetDlgItem(window, 304), areas.results.left + 88, areas.results.top + 8, 125, 100, TRUE);	// Сохраняет место для правой метки времени
+    MoveWindow(GetDlgItem(window, 208), card.left + 12, card.top + 15, 52, 22, TRUE);	// Подписывает участок в общей строке управления
+    MoveWindow(GetDlgItem(window, chartPicker), card.left + 65, card.top + 10, 55, 180, TRUE);	// Показывает только номер участка
+    MoveWindow(GetDlgItem(window, 307), card.left + 132, card.top + 15, 35, 22, TRUE);	// Подписывает раскрывающийся выбор слоев
+    MoveWindow(GetDlgItem(window, 305), card.left + 173, card.top + 10, 104, 25, TRUE);	// Ставит выбор нескольких слоев рядом с участком
+    MoveWindow(GetDlgItem(window, firstExport), card.right - 116, card.top + 10, 105, 26, TRUE);	// Выравнивает выгрузку с остальными элементами
+    MoveWindow(GetDlgItem(window, 301), card.right - 247, card.top + 10, 25, 25, TRUE);	// Приближает масштаб к кнопке выгрузки
+    MoveWindow(GetDlgItem(window, 302), card.right - 218, card.top + 10, 55, 25, TRUE);	// Сохраняет ввод точного процента масштаба
+    MoveWindow(GetDlgItem(window, 303), card.right - 159, card.top + 10, 25, 25, TRUE);	// Ставит увеличение справа от поля
     EnableWindow(GetDlgItem(window, firstExport), state.result && !state.running && !state.edited);	// Запрещает выгрузку отсутствующего или устаревшего результата
     EnableWindow(GetDlgItem(window, sliderId), state.result || state.running);	// Оставляет шкалу неподвижной до команды расчета
     EnableWindow(GetDlgItem(window, 4), state.result && !state.running && !state.edited);	// Разрешает CSV только для актуальной истории
-    EnableWindow(GetDlgItem(window, 1), !state.running);	// Не допускает повторного запуска текущего задания
-    SetDlgItemTextW(window, 1, state.running ? L"Расчет..." : L"Рассчитать");	// Показывает выполнение без отдельной строки обновлений
-    SetDlgItemTextW(window, 5, state.baseline || state.baselineInputs ? L"Убрать базу" : L"Закрепить базу");	// Сохраняет понятное действие сравнения
+    EnableWindow(GetDlgItem(window, 1), TRUE);	// Позволяет начать новое задание после отмены прежнего
+    SetDlgItemTextW(window, 1, state.started ? L"Рассчитать заново" : L"Рассчитать");	// Различает первый запуск и повторное вычисление
 }	// Завершает текущий блок обработки
 void updateTime(HWND window, AppState& state) {	// Обновляет выбранный момент без пересчета
     double seconds = 0;	// Не включает иллюстративную заливку в расчетное время
@@ -293,21 +301,15 @@ void calculate(HWND window, AppState& state, const Project& project) {	// Зап
     state.inputs = project; state.running = true; state.edited = false;	// Фиксирует исходные данные текущего задания
     state.position = 0; state.automatic = true; state.started = true; state.preview = project; state.rebuildMold = true;	// Описывает параметры текущего действия
     state.curves = {};	// Сбрасывает линии прежнего результата
-    const auto restore = state.baseline ? std::optional<Project>{} : state.baselineInputs;	// Определяет необходимость восстановления базы
     arrange(window, state); InvalidateRect(window, nullptr, FALSE); updateTime(window, state);	// Описывает параметры текущего действия
     SetTimer(window, 1, 50, nullptr);	// Запускает плавное воспроизведение заливки
-    state.worker = std::jthread([window, project, restore, generation](std::stop_token stop) {	// Передает потоку независимую копию входов
+    state.worker = std::jthread([window, project, generation](std::stop_token stop) {	// Настраивает отображение текущего элемента
         auto completed = std::make_unique<Completed>();	// Создает сообщение для оконного потока
         completed->generation = generation;	// Отмечает принадлежность результата заданию
         try {	// Защищает оконный поток от расчетных исключений
             completed->result = std::make_shared<Run>();	// Выделяет независимый текущий результат
             completed->result->project = project;	// Сохраняет входы вместе с историей
             completed->result->cooling.calculate(project, stop);	// Вычисляет пять отделений вне интерфейса
-            if (restore && !stop.stop_requested()) {	// Восстанавливает закрепленную базу при запуске
-                completed->baseline = std::make_shared<Run>();	// Выделяет независимый базовый результат
-                completed->baseline->project = *restore;	// Сохраняет исходные данные базы
-                completed->baseline->cooling.calculate(*restore, stop);	// Восстанавливает историю той же моделью
-            }	// Завершает текущий блок обработки
         } catch (const std::exception& error) { completed->error = wide(error.what()); }	// Передает причину неудачного расчета
         if (!stop.stop_requested() && PostMessageW(window, calculationDone, 0, reinterpret_cast<LPARAM>(completed.get()))) { completed.release(); }	// Передает владение только доставляемому сообщению
     });	// Завершает создание фонового задания
@@ -346,7 +348,7 @@ void exportChart(HWND window, AppState& state, int section) {	// Сохраня�
     FillRect(image.dc, &area, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));	// Подготавливает белый фон
     SelectObject(image.dc, GetStockObject(DEFAULT_GUI_FONT));	// Сохраняет читаемый системный шрифт
     CurveCache cache;	// Создает отдельный масштаб экспортируемых линий
-    drawSingleChart(image.dc, area, state.result->project, state.result.get(), state.baseline.get(), section, frameIndex(state), cache, fillProgress(state), state.zoom);	// Описывает параметры текущего действия
+    drawSingleChart(image.dc, area, state.result->project, state.result.get(), section, frameIndex(state), cache, state.zoom, state.metric, state.layers);	// Настраивает отображение текущего элемента
     const CLSID png{0x557cf406, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};	// Выбирает встроенный кодировщик PNG
     Gdiplus::Bitmap bitmap(image.bitmap, nullptr);	// Оборачивает готовый растр для кодировщика
     if (bitmap.Save(path.c_str(), &png, nullptr) != Gdiplus::Ok) { throw std::runtime_error("Не удалось сохранить PNG"); }	// Проверяет успешность записи изображения
@@ -377,20 +379,25 @@ void action(HWND window, AppState& state, int id) {	// Выполняет ком
         const auto path = chooseFile(window, state, L"Таблица CSV\0*.csv\0\0", L"csv", true);	// Предлагает пользовательское название таблицы
         if (!path.empty()) { exportHistory(path, *state.result); }	// Записывает все рассчитанные кадры
     }	// Завершает текущий блок обработки
-    if (id == 5) {	// Закрепляет либо снимает независимое сравнение
-        if (state.running) { throw std::runtime_error("Дождитесь завершения расчета"); }	// Защищает восстанавливаемую базу от изменения
-        const auto path = state.directory / L".rollcast-base-v2.roll";	// Отделяет базу новой ветки от прежней
-        if (state.baseline || state.baselineInputs) {	// Снимает существующее закрепление
-            std::filesystem::remove(path); state.baseline.reset(); state.baselineInputs.reset();	// Удаляет только собственный документ базы
-        } else if (current(window, state)) {	// Закрепляет текущую согласованную историю
-            saveProject(path, state.result->project, state.result.get());	// Сохраняет входы для следующего запуска
-            state.baseline = state.result; state.baselineInputs = state.result->project;	// Удерживает неизменяемый базовый результат
-        }	// Завершает текущий блок обработки
-        state.curves = {}; arrange(window, state);	// Обновляет подпись кнопки и кэш кривых
-        const auto area = layout(window).results; InvalidateRect(window, &area, FALSE);	// Обновляет только панель результатов
-    }	// Завершает текущий блок обработки
     if (id == 6) { showAbout(window); }	// Открывает теорию и концепцию поверх рабочего окна
-    if (id == 7) { state.automatic = false; KillTimer(window, 1); arrange(window, state); }	// Останавливает воспроизведение без очистки выбранного кадра
+    if (id == 7 && state.started && state.position < timelineEnd) {	// Возобновляет тот же расчет с сохраненного момента
+        state.automatic = !state.automatic;	// Переключает остановку и продолжение без сброса данных
+        if (state.automatic) { SetTimer(window, 1, 50, nullptr); } else { KillTimer(window, 1); }	// Управляет лишь воспроизведением готовой истории
+        arrange(window, state);	// Согласует подписи доступных кнопок
+    }	// Завершает текущий блок обработки
+    if (id == 305) {	// Открывает отмечаемый список слоев графика
+        const HMENU menu = CreatePopupMenu();	// Создает штатное раскрывающееся меню
+        AppendMenuW(menu, MF_STRING | (state.layers == 7 ? MF_CHECKED : 0), 400, L"Все");	// Отмечает одновременный выбор трех слоев
+        for (unsigned z = 0; z < 3; ++z) { AppendMenuW(menu, MF_STRING | ((state.layers & (1u << z)) ? MF_CHECKED : 0), 401 + z, layerNames[z]); }	// Сохраняет независимые отметки каждого слоя
+        RECT anchor{}; GetWindowRect(GetDlgItem(window, 305), &anchor);	// Привязывает список к раскрывающей кнопке
+        const int selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, anchor.left, anchor.bottom, 0, window, nullptr);	// Получает действие без изменения расчетного состояния
+        DestroyMenu(menu);	// Освобождает временный список
+        if (selected == 400) { state.layers = 7; }	// Выбирает сразу все кривые
+        else if (selected >= 401 && selected <= 403) { state.layers ^= 1u << (selected - 401); }	// Переключает одну отметку сохраняя остальные
+        std::wstring caption = state.layers == 7 ? L"Все" : state.layers == 0 ? L"Не выбрано" : state.layers == 1 ? L"Твердый" : state.layers == 2 ? L"Двухфазный" : state.layers == 4 ? L"Жидкий" : L"Два слоя";	// Отражает текущий набор в закрытом списке
+        SetDlgItemTextW(window, 305, (caption + L" ▾").c_str());	// Показывает выбранный набор без сброса момента
+        const auto area = layout(window).results; InvalidateRect(window, &area, FALSE);	// Перерисовывает только представление результата
+    }	// Завершает текущий блок обработки
     if (id == 8) { SetDlgItemTextW(window, firstNumber + 16, L"Авто"); }	// Возвращает автоматический горизонт
     if (id == 301 || id == 303) {	// Меняет масштаб графика по кнопкам
         state.zoom = std::clamp(state.zoom + (id == 303 ? 10 : -10), 10, 1000);	// Ограничивает выбранное увеличение
@@ -428,10 +435,10 @@ void paint(HWND window, AppState& state) {	// Рисует только запр
         drawMoldLabel(dc, areas.mold, state.hovered, state.cursor);	// Показывает название выбранной детали
     }	// Завершает текущий блок обработки
     if (IntersectRect(&intersection, &painting.rcPaint, &areas.results)) {	// Пропускает графики при обычном наведении
-        drawMoldDashboard(dc, areas.results, state.preview, !state.running ? state.result.get() : nullptr, !state.running && state.result ? state.baseline.get() : nullptr, frameIndex(state), fillProgress(state), state.selection, state.curves, state.zoom);	// Описывает параметры текущего действия
+        drawMoldDashboard(dc, areas.results, state.preview, !state.running ? state.result.get() : nullptr, frameIndex(state), fillProgress(state), state.selection, state.curves, state.zoom, state.metric, state.layers);	// Настраивает отображение текущего элемента
     }	// Завершает текущий блок обработки
-    const wchar_t* legend[]{L"Твердый", L"Двухфазный", L"Жидкий"};	// Объясняет цвета металла под формой
-    const COLORREF colors[]{RGB(45, 112, 181), RGB(242, 177, 46), RGB(228, 76, 57)};	// Согласует цвета с фазами разреза
+    const wchar_t* legend[]{L"Жидкий", L"Двухфазный", L"Твердый"};	// Настраивает отображение текущего элемента
+    const COLORREF colors[]{RGB(228, 76, 57), RGB(242, 177, 46), RGB(45, 112, 181)};	// Настраивает отображение текущего элемента
     for (int i = 0; state.started && i < 3; ++i) {	// Описывает параметры текущего действия
         const int x = areas.mold.left + 3 + i * (areas.mold.right - areas.mold.left) / 3;	// Распределяет обозначения под формой
         const int y = areas.client.bottom - 33;	// Ставит легенду ниже временной шкалы
@@ -442,7 +449,6 @@ void paint(HWND window, AppState& state) {	// Рисует только запр
     const HPEN separator = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));	// Создает тонкие разделители панелей
     const auto oldSeparator = SelectObject(dc, separator);	// Сохраняет исходное перо
     MoveToEx(dc, 16, 48, nullptr); LineTo(dc, areas.client.right - 16, 48);	// Отделяет основную панель действий
-    MoveToEx(dc, 24, 119, nullptr); LineTo(dc, 302, 119);	// Отделяет вкладки от содержимого
     if (state.tab == 1) { for (int y : {251, 376, 524}) { MoveToEx(dc, 28, y, nullptr); LineTo(dc, 296, y); } }	// Разделяет группы свойств материалов
     SelectObject(dc, oldSeparator); DeleteObject(separator);	// Освобождает перо разделителей
     BitBlt(target, painting.rcPaint.left, painting.rcPaint.top, painting.rcPaint.right - painting.rcPaint.left, painting.rcPaint.bottom - painting.rcPaint.top, dc, painting.rcPaint.left, painting.rcPaint.top, SRCCOPY);	// Переносит только обновленную область
@@ -475,7 +481,7 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));	// Запоминает состояние на время жизни окна
     }	// Завершает текущий блок обработки
     if (!state) { return DefWindowProcW(window, message, wParam, lParam); }	// Передает ранние сообщения стандартному обработчику
-    try {	// Восстанавливает только корректные исходные данные базы
+    try {	// Обрабатывает операцию с контролем возможных ошибок
         switch (message) {	// Выбирает обработчик оконного сообщения
         case WM_CREATE:	// Создает рабочий экран и запускает первый расчет
             createControls(window, *state); arrange(window, *state);	// Создает и размещает элементы управления
@@ -498,10 +504,13 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
             } else if (id == 302 && code == EN_CHANGE && !state->changing) {	// Применяет ручной масштаб без изменения координат карточки
                 const int value = _wtoi(text(GetDlgItem(window, 302)).c_str());	// Разрешает завершающий знак процента
                 if (value >= 10 && value <= 1000) { state->zoom = value; state->curves = {}; const auto area = layout(window).results; InvalidateRect(window, &area, FALSE); }	// Ограничивает масштаб разумным диапазоном
+            } else if (id == 304 && code == CBN_SELCHANGE) {	// Меняет показатель уже рассчитанной истории
+                state->metric = SendDlgItemMessageW(window, 304, CB_GETCURSEL, 0, 0) == 1 ? LayerMetric::thickness : LayerMetric::volume;	// Выбирает толщину либо объем
+                state->curves = {}; const auto area = layout(window).results; InvalidateRect(window, &area, FALSE);	// Не меняет время выбранный участок и состояние паузы
             } else if (id == chartPicker && code == CBN_SELCHANGE) {	// Меняет набор показываемых графиков
                 state->selection = static_cast<int>(SendDlgItemMessageW(window, chartPicker, CB_GETCURSEL, 0, 0));	// Запоминает выбранное отделение
                 arrange(window, *state); const auto area = layout(window).results; InvalidateRect(window, &area, FALSE);	// Перерисовывает только панель результатов
-            } else if (code == BN_CLICKED && ((id >= 1 && id <= 8) || (id >= 300 && id <= 303))) { action(window, *state, id); }	// Завершает текущий блок обработки
+            } else if (code == BN_CLICKED && ((id >= 1 && id <= 8) || (id >= 300 && id <= 305))) { action(window, *state, id); }	// Настраивает отображение текущего элемента
             return 0;	// Возвращает нулевое значение
         }	// Завершает текущий блок обработки
         case WM_NOTIFY: {	// Обрабатывает вкладки и оформление шкалы
@@ -537,10 +546,9 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
                     wchar_t warning[320]{}; std::swprintf(warning, std::size(warning), L"За весь расчет максимум температуры оснастки: %.1f град C. Достигнут %ls. Плавление оснастки не рассчитывается; результат требует проверки.", hottestIron, hottestIron >= state->inputs.ironLiquidus ? L"ликвидус" : L"солидус");	// Различает два контрольных порога
                     state->automatic = false; KillTimer(window, 1); MessageBoxW(window, warning, L"Контроль нагрева оснастки", MB_OK | MB_ICONWARNING);	// Сохраняет результат и приостанавливает воспроизведение для проверки
                 }	// Завершает текущий блок обработки
-                if (completed->baseline) { state->baseline = std::move(completed->baseline); }	// Восстанавливает закрепленную историю
             } else { state->result.reset(); MessageBoxW(window, completed->error.c_str(), L"Ошибка расчета", MB_OK | MB_ICONERROR); }	// Объясняет неудачу без скрытых результатов
             state->curves = {};	// Описывает параметры текущего действия
-            if (!completed->error.empty()) { state->automatic = false; KillTimer(window, 1); }	// Прекращает анимацию при ошибке вычислений
+            if (!completed->error.empty()) { state->automatic = false; state->started = false; KillTimer(window, 1); }	// Настраивает отображение текущего элемента
             arrange(window, *state); updateTime(window, *state);	// Описывает параметры текущего действия
             return 0;	// Возвращает нулевое значение
         }	// Завершает текущий блок обработки
@@ -582,11 +590,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {	// Запуск
     if (!RegisterClassW(&windowClass)) { Gdiplus::GdiplusShutdown(token); return 1; }	// Проверяет регистрацию главного окна
     AppState state; wchar_t executable[32768]{};	// Создает независимое состояние текущего запуска
     GetModuleFileNameW(nullptr, executable, std::size(executable));	// Получает путь исполняемого файла
-    state.directory = std::filesystem::path(executable).parent_path();	// Выбирает папку хранения локальной базы
-    try {	// Восстанавливает только корректные исходные данные базы
-        const auto base = state.directory / L".rollcast-base-v2.roll";	// Определяет путь закрепленного проекта
-        if (std::filesystem::exists(base)) { state.baselineInputs = loadProject(base); }	// Загружает базу для фонового восстановления
-    } catch (...) { state.baselineInputs.reset(); }	// Позволяет запуск при поврежденной базе
+    state.directory = std::filesystem::path(executable).parent_path();	// Выбирает исходную папку сохранения пользовательских файлов
     const HWND window = CreateWindowExW(0, windowClass.lpszClassName, L"RollCast", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1400, 900, nullptr, nullptr, instance, &state);	// Создает единый рабочий экран
     if (!window) { Gdiplus::GdiplusShutdown(token); return 1; }	// Проверяет успешность создания окна
     ShowWindow(window, SW_SHOWMAXIMIZED); UpdateWindow(window);	// Открывает окно на весь доступный экран

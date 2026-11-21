@@ -84,7 +84,7 @@ void MoldCooling::calculate(const Project& p, std::stop_token stop) {	// Рас�
         layers.push_back({(i == 2 ? p.chill : p.sand) / 1000, form.conductivity, form.density, form.heatCapacity, (i == 2 ? p.ironTemperature : p.sandTemperature), 32});	// Описывает параметры текущего действия
         layers.push_back({(i == 2 ? p.barrelFlask : p.flask) / 1000, iron.conductivity, iron.density, iron.heatCapacity, p.ironTemperature, 8});	// Описывает параметры текущего действия
         const CoolingBoundary boundary{p.airTemperature, p.externalTransfer, horizon, p.step, 0, 0, true, radius + p.coating / 1000 + (i == 2 ? 0 : p.sand / 1000), search};	// Описывает параметры текущего действия
-        return solveCooling(layers, boundary, p.phase, std::nullopt, stop);	// Описывает параметры текущего действия
+        return solveCooling(layers, boundary, p.phase, std::nullopt, stop);	// Решает теплопроводность без внутреннего движения расплава
     };	// Завершает объявление структуры или набора данных
     if (p.autoTime) {	// Ищет момент завершения каждого отделения
         double latestFrame = 0;	// Собирает общий момент завершения поиска

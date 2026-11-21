@@ -198,8 +198,8 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         const double layer = radius + p.coating;	// Определяет наружную границу краски
         const double form = layer + (i == 2 ? p.chill : p.sand);	// Окружает бочку кокилем остальные участки песком
         const double outer = form + (i == 2 ? p.barrelFlask : p.flask);	// Добавляет действующую металлическую опоку
-        drawing.box(-outer, top[i], outer, bottom[i], hatch, casingParts[i]);	// Рисует наружный металлический слой
-        drawing.box(-form, top[i], form, bottom[i], i == 2 ? hatch : dots, casingParts[i]);	// Рисует основной материал охлаждающей формы
+        drawing.box(-outer, top[i], i == 4 ? pipe + pipeRadius + 135 : outer, bottom[i], hatch, casingParts[i]);	// Охватывает литники стенками нижней опоки
+        drawing.box(-form, top[i], i == 4 ? pipe + pipeRadius + 135 - p.flask : form, bottom[i], i == 2 ? hatch : dots, casingParts[i]);	// Окружает колено и питатель формовочной смесью
         if (p.coating > 0) { drawing.box(-layer, top[i], layer, bottom[i], paint, casingParts[i]); }	// Показывает противопригарное покрытие
         drawing.box(-radius, top[i], radius, bottom[i], empty, metalParts[i]);	// Сохраняет каждую полость отдельным отделением
     }	// Завершает текущий блок обработки
