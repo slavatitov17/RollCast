@@ -180,8 +180,7 @@ void createControls(HWND window, AppState& state) {	// Создает компа
     control(window, L"BUTTON", L"О программе", BS_PUSHBUTTON | WS_TABSTOP, 0, 10, 130, 31, 6);	// Создает правую кнопку встроенной справки
     control(window, L"BUTTON", L"Рассчитать", BS_PUSHBUTTON | WS_TABSTOP, 28, 0, 336, 34, 1);	// Закрепляет расчет внизу панели параметров
     control(window, L"BUTTON", L"Остановить", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 260, 30, 7);	// Создает доступную во время воспроизведения остановку
-    const HWND tabs = control(window, WC_TABCONTROLW, L"", WS_TABSTOP | TCS_FIXEDWIDTH | TCS_BUTTONS | TCS_FLATBUTTONS, 24, 92, 278, 26, tabsId);	// Настраивает отображение текущего элемента
-    TabCtrl_SetItemSize(tabs, 92, 26);	// Растягивает три раздела на всю ширину панели
+    const HWND tabs = control(window, WC_TABCONTROLW, L"", WS_TABSTOP, 24, 92, 278, 24, tabsId);	// Настраивает отображение текущего элемента
     const wchar_t* titles[]{L"Геометрия", L"Материалы", L"Условия"};	// Описывает параметры текущего действия
     for (int i = 0; i < 3; ++i) { TCITEMW item{}; item.mask = TCIF_TEXT; item.pszText = const_cast<wchar_t*>(titles[i]); TabCtrl_InsertItem(tabs, i, &item); }	// Описывает параметры текущего действия
     groupControl(window, state, 0, L"STATIC", L"Диаметры, мм", 28, 135, 125, 20);	// Описывает параметры текущего действия
@@ -268,12 +267,12 @@ void arrange(HWND window, AppState& state) {	// Размещает постоя�
     MoveWindow(GetDlgItem(window, 304), areas.results.left + 88, areas.results.top + 8, 125, 100, TRUE);	// Сохраняет место для правой метки времени
     MoveWindow(GetDlgItem(window, 208), card.left + 12, card.top + 15, 52, 22, TRUE);	// Подписывает участок в общей строке управления
     MoveWindow(GetDlgItem(window, chartPicker), card.left + 65, card.top + 10, 55, 180, TRUE);	// Показывает только номер участка
-    MoveWindow(GetDlgItem(window, 307), card.left + 132, card.top + 15, 35, 22, TRUE);	// Подписывает раскрывающийся выбор слоев
-    MoveWindow(GetDlgItem(window, 305), card.left + 173, card.top + 10, 104, 25, TRUE);	// Ставит выбор нескольких слоев рядом с участком
+    MoveWindow(GetDlgItem(window, 307), card.right - 399, card.top + 15, 35, 22, TRUE);	// Подписывает раскрывающийся выбор слоев
+    MoveWindow(GetDlgItem(window, 305), card.right - 358, card.top + 10, 104, 26, TRUE);	// Приближает выбор слоев к масштабу
     MoveWindow(GetDlgItem(window, firstExport), card.right - 116, card.top + 10, 105, 26, TRUE);	// Выравнивает выгрузку с остальными элементами
-    MoveWindow(GetDlgItem(window, 301), card.right - 247, card.top + 10, 25, 25, TRUE);	// Приближает масштаб к кнопке выгрузки
-    MoveWindow(GetDlgItem(window, 302), card.right - 218, card.top + 10, 55, 25, TRUE);	// Сохраняет ввод точного процента масштаба
-    MoveWindow(GetDlgItem(window, 303), card.right - 159, card.top + 10, 25, 25, TRUE);	// Ставит увеличение справа от поля
+    MoveWindow(GetDlgItem(window, 301), card.right - 247, card.top + 10, 25, 26, TRUE);	// Приближает масштаб к кнопке выгрузки
+    MoveWindow(GetDlgItem(window, 302), card.right - 218, card.top + 10, 55, 26, TRUE);	// Сохраняет ввод точного процента масштаба
+    MoveWindow(GetDlgItem(window, 303), card.right - 159, card.top + 10, 25, 26, TRUE);	// Ставит увеличение справа от поля
     EnableWindow(GetDlgItem(window, firstExport), state.result && !state.running && !state.edited);	// Запрещает выгрузку отсутствующего или устаревшего результата
     EnableWindow(GetDlgItem(window, sliderId), state.result || state.running);	// Оставляет шкалу неподвижной до команды расчета
     EnableWindow(GetDlgItem(window, 4), state.result && !state.running && !state.edited);	// Разрешает CSV только для актуальной истории

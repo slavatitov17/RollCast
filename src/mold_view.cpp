@@ -59,7 +59,7 @@ struct Drawing {	// Преобразует точки чертежа в коор
         return {std::lround(originX + point.x * scale),	// Округляет горизонтальную координату
                 std::lround(originY + point.y * scale)};	// Округляет вертикальную координату
     }	// Завершает текущий блок обработки
-    void shape(std::initializer_list<Location> outlinePoints, HBRUSH fill, MoldPart part) const {	// Рисует и регистрирует замкнутый контур
+    void shape(const std::vector<Location>& outlinePoints, HBRUSH fill, MoldPart part) const {	// Рисует и регистрирует замкнутый контур
         std::vector<POINT> points;	// Подготавливает точки для GDI
         points.reserve(outlinePoints.size());	// Резервирует память для всего контура
         for (const Location vertex : outlinePoints) {	// Обходит опорные точки контура
@@ -103,20 +103,66 @@ HBRUSH createStipple(HDC device) {	// Создает мелкий точечны
     void* data = nullptr;	// Принимает адрес буфера пикселей
     const HBITMAP bitmap = CreateDIBSection(device, &texture, DIB_RGB_COLORS, &data, nullptr, 0);	// Создает образец кисти
     if (!bitmap) {	// Проверяет успешность создания образца
-        return CreateSolidBrush(RGB(231, 237, 241));	// Возвращает однотонную подложку при ошибке
+        return CreateSolidBrush(RGB(255, 255, 255));	// Возвращает однотонную подложку при ошибке
     }	// Завершает текущий блок обработки
     auto* pixels = static_cast<DWORD*>(data);	// Получает доступ к каждому пикселю
-    std::fill_n(pixels, 64, 0xE7EDF1);	// Заполняет образец светлым цветом
-    pixels[9] = pixels[45] = 0x8597A4;	// Расставляет две точки по диагонали
+    std::fill_n(pixels, 64, 0xFFFFFF);	// Заполняет образец светлым цветом
+    pixels[9] = pixels[45] = 0x202020;	// Расставляет две точки по диагонали
     const HBRUSH brush = CreatePatternBrush(bitmap);	// Создает кисть с повторяемым узором
     DeleteObject(bitmap);	// Освобождает исходный образец после создания кисти
     return brush;	// Передает кисть вызывающей функции
 }	// Завершает текущий блок обработки
-void drawFasteners(const Drawing& drawing, double radius, double height, HBRUSH brush, MoldPart part) {	// Рисует парные скобы опоки
+HBRUSH createBricks(HDC device) {	// Создает черно белый кирпичный узор плиты
+    BITMAPINFO texture{};	// Подготавливает заголовок образца кисти
+    texture.bmiHeader = {sizeof(BITMAPINFOHEADER), 24, -12, 1, 32, BI_RGB, 0, 0, 0, 0, 0};	// Задает повторяемый рисунок размером двадцать четыре
+    void* data = nullptr;	// Принимает память пикселей образца
+    const HBITMAP bitmap = CreateDIBSection(device, &texture, DIB_RGB_COLORS, &data, nullptr, 0);	// Создает поверхность кирпичного узора
+    if (!bitmap) { return CreateSolidBrush(RGB(255, 255, 255)); }	// Сохраняет белый фон при нехватке ресурсов
+    auto* pixels = static_cast<DWORD*>(data);	// Открывает доступ к строкам образца
+    for (int y = 0; y < 12; ++y) {	// Обходит два ряда кирпичей
+        for (int x = 0; x < 24; ++x) {	// Рисует горизонтальные и смещенные вертикальные швы
+            const bool joint = y % 6 == 0 || (x + (y < 6 ? 0 : 6)) % 12 == 0;	// Смещает швы соседних рядов на полкирпича
+            pixels[y * 24 + x] = joint ? 0x202020 : 0xFFFFFF;	// Оставляет черные швы на белом фоне
+        }	// Завершает текущий блок обработки
+    }	// Завершает текущий блок обработки
+    const HBRUSH brush = CreatePatternBrush(bitmap);	// Создает повторяемую кисть подопочной плиты
+    DeleteObject(bitmap); return brush;	// Освобождает образец и передает готовую кисть
+}	// Завершает текущий блок обработки
+double sectionRadius(const Project& p, std::size_t i, double t) {	// Определяет контур схемы по текущей геометрии
+    const auto radius = [&](std::size_t k) { return p.dimensions[k].diameter / 2.0; };	// Читает номинальные диаметры пяти расчетных цилиндров
+    const double local = radius(i);	// Сохраняет номинальный радиус выбранного участка
+    if (i <= 1) {	// Соединяет прибыль с верхней шейкой
+        const double u = (i == 0 ? t * p.dimensions[0].height : p.dimensions[0].height + t * p.dimensions[1].height) / (p.dimensions[0].height + p.dimensions[1].height);	// Находит положение вдоль обеих верхних частей
+        const double neck = radius(0) * (1 - u) + radius(1) * 0.84 * u;	// Повторяет плавное сужение исходной схемы
+        const double blend = i == 1 ? std::clamp((t - 0.78) / 0.22, 0.0, 1.0) : 0;	// Выделяет скругленный переход к бочке
+        return neck + (radius(2) - neck) * blend * blend;	// Раскрывает заделку к верхнему торцу бочки
+    }	// Завершает текущий блок обработки
+    if (i == 3) {	// Соединяет бочку с нижней шейкой
+        const double blend = std::clamp(t / 0.22, 0.0, 1.0);	// Выделяет короткое скругление нижнего перехода
+        const double neck = local * (1 - 0.1 * t);	// Сужает верхнюю часть нижней шейки
+        return neck + (radius(2) - neck) * (1 - blend) * (1 - blend);	// Сохраняет касание бочки и плавный уступ
+    }	// Завершает текущий блок обработки
+    if (i == 4) { return radius(3) * 0.9 * (1 - t) + local * 0.82 * t; }	// Продолжает уклон до нижнего конца модели
+    return local;	// Оставляет рабочую бочку цилиндрической
+}	// Завершает текущий блок обработки
+std::vector<Location> sectionContour(const Project& p, std::size_t i, double top, double bottom, double inner = -1, double outer = 1) {	// Строит изменяемый контур полости либо полосы
+    std::vector<Location> points;	// Собирает обе стороны продольного сечения
+    for (int k = 0; k <= 20; ++k) {	// Аппроксимирует правую сторону плавного перехода
+        const double t = k / 20.0;	// Задает относительную высоту точки
+        points.push_back({outer * sectionRadius(p, i, t), top + (bottom - top) * t});	// Добавляет точку внешней границы полосы
+    }	// Завершает текущий блок обработки
+    for (int k = 20; k >= 0; --k) {	// Возвращается по противоположной стороне полосы
+        const double t = k / 20.0;	// Сохраняет соответствие противоположных точек
+        points.push_back({inner * sectionRadius(p, i, t), top + (bottom - top) * t});	// Замыкает внутреннюю границу полосы
+    }	// Завершает текущий блок обработки
+    return points;	// Передает готовый контур для GDI
+}	// Завершает текущий блок обработки
+void drawFasteners(const Drawing& drawing, double radius, double height, HBRUSH brush, MoldPart part, double rightRadius = -1) {	// Рисует парные скобы опоки
     for (double side : {-1.0, 1.0}) {	// Повторяет форму скобы с противоположной стороны
-        const double inner = side * (radius - 22);	// Находит точку захвата у стенки
-        const double outer = side * (radius + 72);	// Задает внешний край скобы
-        const double lip = side * (radius + 37);	// Задает внутренний уступ скобы
+        const double wall = side > 0 && rightRadius >= 0 ? rightRadius : radius;	// Учитывает расширенную правую стенку нижней опоки
+        const double inner = side * (wall - 22);	// Находит точку захвата у стенки
+        const double outer = side * (wall + 72);	// Задает внешний край скобы
+        const double lip = side * (wall + 37);	// Задает внутренний уступ скобы
         drawing.shape({{inner, height - 80}, {outer, height - 80}, {outer, height + 80},	// Задает внешний контур скобы
                        {inner, height + 80}, {inner, height + 39}, {lip, height + 39},	// Формирует нижний захват скобы
                        {lip, height - 39}, {inner, height - 39}}, brush, part);	// Формирует верхний захват скобы
@@ -166,70 +212,92 @@ void drawMoldLabel(HDC device, const RECT& area, MoldPart part, POINT cursor) {	
 }	// Завершает текущий блок обработки
 void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, MoldPart hovered, POINT cursor, const MoldFrame& state, bool rebuild) {	// Рисует пять отделений и литниковый путь
     if (rebuild) { hits.clear(); }	// Обновляет области только при изменении геометрии
-    const double frame = outerDiameter(p) / 2;	// Определяет максимальный поперечный габарит оснастки
-    const double floor = totalLength(p);	// Получает общую осевую длину валка
-    const double pipe = frame + 320;	// Отделяет литниковую трубу от корпуса формы
-    const double pipeRadius = p.pipeDiameter / 2;	// Использует заданный внутренний диаметр DS
+    const double frame = outerDiameter(p) / 2;	// Определяет наибольший радиус основной формы
+    const double floor = totalLength(p);	// Суммирует осевые размеры пяти участков
+    const double pipeRadius = p.pipeDiameter / 2;	// Сохраняет действующий радиус литниковой трубы
+    const double pipeSand = std::max(25.0, p.sand * 0.35);	// Обозначает футеровку внутри металлического стояка
+    const double pipeWall = std::max(15.0, p.flask);	// Определяет толщину наружной стенки стояка
+    const double pipeOuter = pipeRadius + pipeSand + pipeWall;	// Учитывает канал футеровку и наружную стенку
+    const double pipe = frame + pipeOuter + 140;	// Оставляет просвет между трубой и корпусом
     const double funnelTop = -450;	// Размещает воронку выше прибыльной надставки
-    const double width = area.right - area.left - 44;	// Оставляет горизонтальные поля вокруг чертежа
-    const double height = area.bottom - area.top - 36;	// Оставляет вертикальные поля вокруг чертежа
-    if (width <= 0 || height <= 0) { return; }	// Пропускает недоступную область рисования
-    const double sceneWidth = 2 * frame + 850;	// Учитывает трубу воронку и подопочную плиту
-    const double sceneHeight = floor + 650;	// Учитывает верхнюю воронку и нижнюю плиту
-    const double scale = std::min(width / sceneWidth, height / sceneHeight);	// Сохраняет одинаковый масштаб по обеим осям
+    const double base = std::max(50.0, p.dimensions[4].height * 0.08);	// Оставляет формовочную смесь под нижней шейкой
+    const double minX = -frame - 130;	// Вмещает крепления и левый край плиты
+    const double maxX = pipe + std::max(290.0, pipeOuter + 140);	// Вмещает воронку фланцы и правый край
+    const double width = area.right - area.left - 32;	// Оставляет небольшие горизонтальные поля схемы
+    const double height = area.bottom - area.top - 28;	// Оставляет небольшие вертикальные поля схемы
+    if (width <= 0 || height <= 0) { return; }	// Не рисует в недоступной области окна
+    const double sceneWidth = maxX - minX;	// Вычисляет полный габарит изменяемой сборки
+    const double sceneHeight = floor + base + 70 - funnelTop;	// Учитывает воронку нижнюю форму и плиту
+    const double scale = std::min(width / sceneWidth, height / sceneHeight);	// Сохраняет пропорции при вписывании схемы
     const int saved = SaveDC(dc);	// Сохраняет графическое состояние родительского окна
-    SetBkColor(dc, RGB(218, 227, 233)); SetBkMode(dc, OPAQUE);	// Настраивает фон штриховки оснастки
-    const HPEN outline = CreatePen(PS_SOLID, 1, RGB(49, 65, 77));	// Выбирает читаемые контуры деталей
-    const HPEN mutedOutline = CreatePen(PS_SOLID, 1, RGB(202, 211, 217));	// Создает приглушенный контур других деталей
-    const HBRUSH muted = CreateSolidBrush(RGB(242, 245, 247));	// Осветляет детали вне выделения
-    const HBRUSH hatch = CreateHatchBrush(HS_BDIAGONAL, RGB(114, 134, 148));	// Обозначает металлические стенки формы
-    const HBRUSH dots = createStipple(dc);	// Обозначает песчаные слои формы
-    const HBRUSH paint = CreateSolidBrush(RGB(184, 190, 160));	// Обозначает слой противопригарной краски
-    const HBRUSH fastener = CreateSolidBrush(RGB(166, 184, 195));	// Обозначает рамки крепежи и плиту
-    const auto empty = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));	// Сохраняет пустую полость до заливки
-    const Drawing drawing{dc, scale, area.left + 22 + (width - sceneWidth * scale) / 2 + (frame + 120) * scale, area.top + 18 + (height - sceneHeight * scale) / 2 - funnelTop * scale, area, hits, hovered, outline, mutedOutline, muted, rebuild};	// Задает единое преобразование геометрии в экран
-    std::array<double, sectionCount> top{}, bottom{};	// Хранит точные границы пяти отделений
-    const MoldPart metalParts[]{MoldPart::profit, MoldPart::upperModel, MoldPart::barrel, MoldPart::lowerModelMiddle, MoldPart::lowerModelBottom};	// Связывает номера с металлическими полостями
-    const MoldPart casingParts[]{MoldPart::riser, MoldPart::upperFrame, MoldPart::chill, MoldPart::middleFrame, MoldPart::flask};	// Связывает участки с окружающей оснасткой
-    for (std::size_t i = 0; i < sectionCount; ++i) {	// Размещает номера внутри соответствующих полостей
-        top[i] = i == 0 ? 0 : bottom[i - 1];	// Продолжает ось без осевого зазора
-        bottom[i] = top[i] + p.dimensions[i].height;	// Использует осевой размер соответствующего отделения
-        const double radius = p.dimensions[i].diameter / 2.0;	// Вычисляет внутренний радиус полости
-        const double layer = radius + p.coating;	// Определяет наружную границу краски
-        const double form = layer + (i == 2 ? p.chill : p.sand);	// Окружает бочку кокилем остальные участки песком
-        const double outer = form + (i == 2 ? p.barrelFlask : p.flask);	// Добавляет действующую металлическую опоку
-        drawing.box(-outer, top[i], i == 4 ? pipe + pipeRadius + 135 : outer, bottom[i], hatch, casingParts[i]);	// Охватывает литники стенками нижней опоки
-        drawing.box(-form, top[i], i == 4 ? pipe + pipeRadius + 135 - p.flask : form, bottom[i], i == 2 ? hatch : dots, casingParts[i]);	// Окружает колено и питатель формовочной смесью
-        if (p.coating > 0) { drawing.box(-layer, top[i], layer, bottom[i], paint, casingParts[i]); }	// Показывает противопригарное покрытие
-        drawing.box(-radius, top[i], radius, bottom[i], empty, metalParts[i]);	// Сохраняет каждую полость отдельным отделением
+    SetBkColor(dc, RGB(255, 255, 255)); SetBkMode(dc, OPAQUE);	// Оставляет белые промежутки между черными штрихами
+    const HPEN outline = CreatePen(PS_SOLID, 1, RGB(0, 0, 0));	// Обводит детали черным контуром
+    const HPEN mutedOutline = CreatePen(PS_SOLID, 1, RGB(205, 205, 205));	// Осветляет невыбранные детали при наведении
+    const HBRUSH muted = CreateSolidBrush(RGB(246, 246, 246));	// Приглушает фон остальных деталей
+    const HBRUSH hatch = CreateHatchBrush(HS_BDIAGONAL, RGB(0, 0, 0));	// Обозначает металлические стенки диагональными штрихами
+    const HBRUSH dots = createStipple(dc);	// Обозначает формовочную смесь точечным узором
+    const HBRUSH paint = CreateSolidBrush(RGB(40, 40, 40));	// Показывает тонкий противопригарный слой темным
+    const HBRUSH fastener = CreateHatchBrush(HS_FDIAGONAL, RGB(0, 0, 0));	// Меняет направление штрихов на креплениях
+    const HBRUSH bricks = createBricks(dc);	// Обозначает плиту кирпичным узором образца
+    const auto empty = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));	// Оставляет полости белыми до начала заливки
+    const Drawing drawing{dc, scale, area.left + 16 + (width - sceneWidth * scale) / 2 - minX * scale, area.top + 14 + (height - sceneHeight * scale) / 2 - funnelTop * scale, area, hits, hovered, outline, mutedOutline, muted, rebuild};	// Вписывает сборку единым преобразованием координат
+    std::array<double, sectionCount> top{}, bottom{};	// Хранит точные осевые границы пяти участков
+    const MoldPart metalParts[]{MoldPart::profit, MoldPart::upperModel, MoldPart::barrel, MoldPart::lowerModelMiddle, MoldPart::lowerModelBottom};	// Связывает полости с прежними номерами участков
+    const MoldPart casingParts[]{MoldPart::riser, MoldPart::upperFrame, MoldPart::chill, MoldPart::middleFrame, MoldPart::flask};	// Сохраняет названия окружающей оснастки
+    const double barrelOuter = p.dimensions[2].diameter / 2.0 + p.coating + p.chill + p.barrelFlask;	// Сохраняет независимую толщину кокиля вокруг бочки
+    const double shoulder = p.dimensions[2].diameter / 2.0 + p.coating + p.flask + 20;	// Вмещает переход к бочке внутри стенок
+    const double upperOuter = std::max(shoulder, std::max(p.dimensions[0].diameter, p.dimensions[1].diameter) / 2.0 + p.coating + p.sand + p.flask);	// Соединяет верхние стенки без случайных уступов
+    const double lowerOuter = std::max(shoulder, std::max(p.dimensions[3].diameter, p.dimensions[4].diameter) / 2.0 + p.coating + p.sand + p.flask);	// Соединяет нижние стенки общей опоки
+    const double bottomRight = pipe + pipeOuter + 55;	// Охватывает колено правой стенкой нижней опоки
+    for (std::size_t i = 0; i < sectionCount; ++i) {	// Строит пять отделений по текущим размерам
+        top[i] = i == 0 ? 0 : bottom[i - 1];	// Продолжает ось без осевых зазоров
+        bottom[i] = top[i] + p.dimensions[i].height;	// Применяет длину собственного участка
+        const double outer = i <= 1 ? upperOuter : i == 2 ? barrelOuter : lowerOuter;	// Выбирает наружную стенку соответствующей сборки
+        const double wall = i == 2 ? p.barrelFlask : p.flask;	// Учитывает введенную толщину металлической оболочки
+        const double right = i == 4 ? bottomRight : outer;	// Расширяет нижнюю опоку вокруг литников
+        const double low = bottom[i] + (i == 4 ? base : 0);	// Оставляет песчаное основание под полостью
+        drawing.box(-outer, top[i], right, low, hatch, casingParts[i]);	// Рисует штрихованные наружные стенки формы
+        drawing.box(-outer + wall, top[i], right - wall, low - (i == 4 ? wall : 0), i == 2 ? hatch : dots, casingParts[i]);	// Заполняет песчаные части точками кокиль штрихами
+        auto coating = sectionContour(p, i, top[i], bottom[i]);	// Получает контур модели данного участка
+        for (auto& point : coating) { point.x += point.x < 0 ? -p.coating : p.coating; }	// Отодвигает наружную границу покрытия от металла
+        if (p.coating > 0) { drawing.shape(coating, paint, casingParts[i]); }	// Показывает покрытие по обеим сторонам модели
+        drawing.shape(sectionContour(p, i, top[i], bottom[i]), empty, metalParts[i]);	// Рисует сужения и скругления полости отливки
     }	// Завершает текущий блок обработки
-    drawing.box(-frame - 100, floor + 15, pipe + 270, floor + 100, fastener, MoldPart::plate);	// Рисует подопочную плиту под формой
-    const double riserOuter = p.dimensions[0].diameter / 2.0 + p.coating + p.sand + p.flask;	// Определяет действующую наружную стенку прибыльной надставки
-    drawing.box(-riserOuter - 30, -30, riserOuter + 30, 0, fastener, MoldPart::riser);	// Рисует верхний край прибыльной надставки
-    drawFasteners(drawing, std::max(p.dimensions[0].diameter, p.dimensions[1].diameter) / 2.0 + p.coating + p.sand + p.flask, bottom[0], fastener, MoldPart::upperFrame);	// Показывает стык прибыли и верхней шейки
-    drawFasteners(drawing, std::max(p.dimensions[3].diameter, p.dimensions[4].diameter) / 2.0 + p.coating + p.sand + p.flask, bottom[3], fastener, MoldPart::flask);	// Показывает разъем нижней опоки
-    const double gateY = floor - p.dimensions[4].height * 0.15;	// Вводит металл в нижнюю часть шейки
-    const double turnY = gateY - 100;	// Размещает колено выше наклонного питателя
-    const double gateRadius = std::min(35.0, p.pipeDiameter / 3);	// Ограничивает ширину условного питателя
-    drawing.box(pipe - pipeRadius - 65, -80, pipe + pipeRadius + 65, turnY, hatch, MoldPart::pipe);	// Рисует кожух литниковой трубы
-    drawing.box(pipe - pipeRadius, -80, pipe + pipeRadius, turnY, empty, MoldPart::pipe);	// Использует DS для внутреннего канала
-    for (double joint : {-80.0, floor * 0.35, floor * 0.65, turnY}) {	// Расставляет соединительные обоймы трубы
-        drawing.box(pipe - pipeRadius - 110, joint - 20, pipe + pipeRadius + 110, joint + 20, hatch, MoldPart::pipe);	// Рисует разъемный фланец трубы
-        drawing.box(pipe - pipeRadius, joint - 21, pipe + pipeRadius, joint + 21, empty, MoldPart::pipe);	// Сохраняет непрерывность внутреннего канала
+    drawing.box(minX, floor + base, maxX, floor + base + 40, bricks, MoldPart::plate);	// Рисует широкую плиту с кирпичными швами
+    drawing.box(-lowerOuter - 35, floor + base - 25, bottomRight + 15, floor + base, hatch, MoldPart::flask);	// Показывает подошву нижней опоки над плитой
+    drawing.shape({{-upperOuter - 165, 0}, {-upperOuter - 165, -85}, {upperOuter + 25, -45}, {upperOuter + 25, 0}, {upperOuter - p.flask, 0}, {upperOuter - p.flask, -25}, {-upperOuter + p.flask, -25}, {-upperOuter + p.flask, 0}}, fastener, MoldPart::riser);	// Повторяет выступающий наклонный край прибыльной надставки
+    drawing.box(-p.dimensions[0].diameter * 0.32, -48, p.dimensions[0].diameter * 0.32, -38, paint, MoldPart::rod);	// Показывает верхнюю планку сигнального стержня
+    drawFasteners(drawing, upperOuter, bottom[0], fastener, MoldPart::upperFrame);	// Размещает верхний разъем и парные скобы
+    drawFasteners(drawing, lowerOuter, bottom[3], fastener, MoldPart::flask, bottomRight);	// Размещает разъем нижней опоки
+    drawing.box(-barrelOuter - 25, top[2] - 30, -barrelOuter + 30, top[2] + 30, hatch, MoldPart::chill);	// Показывает верхний выступ левой половины кокиля
+    drawing.box(barrelOuter - 30, top[2] - 30, barrelOuter + 25, top[2] + 30, hatch, MoldPart::chill);	// Повторяет выступ на правой половине кокиля
+    drawFasteners(drawing, lowerOuter, floor + base - 45, fastener, MoldPart::flask, bottomRight);	// Показывает крепление нижней опоки у плиты
+    const double gateY = floor - p.dimensions[4].height * 0.13;	// Подводит питатель к нижнему концу шейки
+    const double turnY = gateY - std::min(130.0, p.dimensions[4].height * 0.3);	// Сохраняет колено внутри нижней опоки
+    const double gateRadius = std::min(30.0, p.pipeDiameter / 3);	// Ограничивает ширину питателя размерами стояка
+    drawing.box(pipe - pipeOuter, -80, pipe + pipeOuter, turnY, hatch, MoldPart::pipe);	// Рисует наружную металлическую стенку литниковой трубы
+    drawing.box(pipe - pipeRadius - pipeSand, -80, pipe + pipeRadius + pipeSand, turnY, dots, MoldPart::pipe);	// Показывает точечную футеровку литниковой трубы
+    drawing.box(pipe - pipeRadius, -80, pipe + pipeRadius, turnY, empty, MoldPart::pipe);	// Оставляет канал стояка открытым и непрерывным
+    for (double joint : {-80.0, floor * 0.28, floor * 0.58}) {	// Повторяет три фланца на высоте стояка
+        drawing.box(pipe - pipeOuter - 65, joint - 20, pipe + pipeOuter + 65, joint + 20, fastener, MoldPart::pipe);	// Показывает выступающие разъемы литниковой трубы
+        drawing.box(pipe - pipeRadius - pipeSand, joint - 21, pipe + pipeRadius + pipeSand, joint + 21, dots, MoldPart::pipe);	// Продолжает футеровку через фланец
+        drawing.box(pipe - pipeRadius, joint - 21, pipe + pipeRadius, joint + 21, empty, MoldPart::pipe);	// Соединяет белые полости соседних секций
     }	// Завершает текущий блок обработки
-    drawing.shape({{pipe - 280, funnelTop}, {pipe + 280, funnelTop}, {pipe + pipeRadius + 50, -80}, {pipe - pipeRadius - 50, -80}}, hatch, MoldPart::funnel);	// Рисует наружный контур воронки
-    drawing.shape({{pipe - 235, funnelTop}, {pipe + 235, funnelTop}, {pipe + pipeRadius, -80}, {pipe - pipeRadius, -80}}, empty, MoldPart::funnel);	// Соединяет полость воронки с трубой
-    const double entry = p.dimensions[4].diameter / 2.0;	// Находит правую стенку нижнего отделения
-    drawing.shape({{pipe - 170, turnY - gateRadius}, {entry, gateY - gateRadius}, {entry, gateY + gateRadius}, {pipe - 150, turnY + gateRadius}}, empty, MoldPart::gate);	// Рисует наклонный питатель до нижней шейки
+    const double funnelHalf = std::max(280.0, pipeOuter + 60);	// Раскрывает воронку над наружной трубой
+    drawing.shape({{pipe - funnelHalf, funnelTop}, {pipe + funnelHalf, funnelTop}, {pipe + pipeRadius + 45, -80}, {pipe - pipeRadius - 45, -80}}, fastener, MoldPart::funnel);	// Рисует наклонные штрихованные стенки воронки
+    drawing.shape({{pipe - funnelHalf + 35, funnelTop}, {pipe + funnelHalf - 35, funnelTop}, {pipe + pipeRadius, -80}, {pipe - pipeRadius, -80}}, empty, MoldPart::funnel);	// Оставляет внутреннюю поверхность воронки белой
+    const double entry = sectionRadius(p, 4, 0.87);	// Соединяет питатель с действующей наклонной стенкой
+    drawing.shape({{pipe - 170, turnY - gateRadius - 12}, {entry, gateY - gateRadius - 12}, {entry, gateY + gateRadius + 12}, {pipe - 150, turnY + gateRadius + 12}}, paint, MoldPart::gate);	// Обводит наклонный питатель тонкой темной оболочкой
+    drawing.shape({{pipe - 170, turnY - gateRadius}, {entry - 5, gateY - gateRadius}, {entry - 5, gateY + gateRadius}, {pipe - 150, turnY + gateRadius}}, empty, MoldPart::gate);	// Открывает наклонный канал к нижней шейке
     const auto elbow = [&]() {	// Задает плавное колено литникового пути
         BeginPath(dc); drawing.moveTo({pipe - pipeRadius, turnY - 70});	// Начинает внутреннюю стенку колена
-        drawing.curveTo({pipe - pipeRadius, turnY - 20}, {pipe - 120, turnY - gateRadius}, {pipe - 170, turnY - gateRadius});	// Подводит канал к наклонному питателю
+        drawing.curveTo({pipe - pipeRadius, turnY - 20}, {pipe - 120, turnY - gateRadius}, {pipe - 170, turnY - gateRadius});	// Поворачивает поток к наклонному питателю
         drawing.lineTo({pipe - 150, turnY + gateRadius});	// Соединяет нижние стенки литниковых каналов
-        drawing.curveTo({pipe - 70, turnY + gateRadius}, {pipe + pipeRadius, turnY}, {pipe + pipeRadius, turnY - 70});	// Возвращает наружную стенку к трубе
-        CloseFigure(dc); EndPath(dc);	// Замыкает внутреннюю полость колена
+        drawing.curveTo({pipe - 70, turnY + gateRadius}, {pipe + pipeRadius, turnY}, {pipe + pipeRadius, turnY - 70});	// Возвращает наружную стенку к вертикальной трубе
+        CloseFigure(dc); EndPath(dc);	// Замыкает внутренний канал колена
     };	// Завершает объявление структуры или набора данных
-    drawing.style(MoldPart::elbow, empty); elbow(); StrokeAndFillPath(dc);	// Рисует колено с учетом выделения
-    if (rebuild) { elbow(); const auto region = PathToRegion(dc); hits.addFluid(region, false); hits.add(region, MoldPart::elbow); }	// Сохраняет область наведения и канал заполнения
+    drawing.style(MoldPart::elbow, empty); elbow(); StrokeAndFillPath(dc);	// Рисует закругленный поворот внутри нижней опоки
+    if (rebuild) { elbow(); const auto region = PathToRegion(dc); hits.addFluid(region, false); hits.add(region, MoldPart::elbow); }	// Регистрирует поворот для подсказки и заливки
     const HBRUSH colors[]{CreateSolidBrush(RGB(45, 112, 181)), CreateSolidBrush(RGB(242, 177, 46)), CreateSolidBrush(RGB(228, 76, 57)), muted};	// Согласует цвета трех зон с легендой
     const auto box = [&](double left, double y1, double right, double y2, HBRUSH brush) {	// Закрашивает область без новых областей наведения
         const auto a = drawing.pixel({left, y1}); const auto b = drawing.pixel({right, y2});	// Переводит физические координаты в экранные
@@ -242,7 +310,7 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         const double front = funnelTop + (turnY + 60 - funnelTop) * std::min(1.0, state.filling / 0.14);	// Ведет металл от воронки вниз
         const double drain = std::clamp((state.filling - 0.88) / 0.12, 0.0, 1.0);	// Постепенно опустошает литники перед окончанием заливки
         const double tail = funnelTop + (turnY + 80 - funnelTop) * drain;	// Опускает заднюю границу поступающего металла
-        box(pipe - 320, tail, pipe + 320, front, color);	// Покрывает всю ширину воронки включая левый угол
+        box(pipe - funnelHalf, tail, pipe + funnelHalf, front, color);	// Покрывает всю ширину воронки включая левый угол
         if (state.filling > 0.14 && state.filling < 0.99) {	// Описывает параметры текущего действия
             const double x = pipe - 175 - (pipe - 175 - entry) * std::min(1.0, (state.filling - 0.14) / 0.06);	// Передвигает фронт к полости валка
             box(x, turnY - 60, pipe - 140, gateY + gateRadius, color);	// Завершает путь перед подъемом уровня
@@ -267,8 +335,13 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
                 for (std::size_t k = 2; k <= profile.size(); ++k) {	// Объединяет соседние интервалы одинакового состояния
                     const int next = k == profile.size() ? -1 : zoneAt(k);	// Замыкает последнюю полосу у стенки
                     if (next != zone) {	// Рисует только границу смены состояния
-                        box(r(start), top[i], r(k - 1), bottom[i], colors[selected ? zone : 3]);	// Окрашивает правую непрерывную полосу металла
-                        box(-r(k - 1), top[i], -r(start), bottom[i], colors[selected ? zone : 3]);	// Окрашивает симметричную левую полосу металла
+                        for (double side : {-1.0, 1.0}) {	// Повторяет фазовую полосу симметрично относительно оси
+                            const auto contour = sectionContour(p, i, top[i], bottom[i], side * r(start) / radius, side * r(k - 1) / radius);	// Согласует границы фаз с наклонным контуром
+                            std::vector<POINT> points;	// Подготавливает экранный контур цветной полосы
+                            for (const auto point : contour) { points.push_back(drawing.pixel(point)); }	// Преобразует относительный профиль в экранные точки
+                            SelectObject(dc, GetStockObject(NULL_PEN)); SelectObject(dc, colors[selected ? zone : 3]);	// Убирает швы между соседними фазовыми полосами
+                            Polygon(dc, points.data(), static_cast<int>(points.size()));	// Окрашивает фазу внутри соответствующего сужения
+                        }	// Завершает текущий блок обработки
                         start = k - 1; zone = next;	// Начинает следующую цветовую полосу профиля
                     }	// Завершает текущий блок обработки
                 }	// Завершает текущий блок обработки
@@ -276,15 +349,21 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         }	// Завершает текущий блок обработки
         RestoreDC(dc, clipping);	// Возвращает исходные графические ограничения
     }	// Завершает текущий блок обработки
-    drawing.box(-8, 0, 8, bottom[1] + p.dimensions[2].height * 0.2, fastener, MoldPart::rod);	// Показывает условный сигнальный стержень
+    for (std::size_t i = 0; i < sectionCount; ++i) {	// Восстанавливает разделители поверх цветной заливки
+        drawing.style(metalParts[i], static_cast<HBRUSH>(GetStockObject(NULL_BRUSH)));	// Сохраняет цвет металла и черный контур
+        std::vector<POINT> points;	// Подготавливает контур выбранного участка
+        for (const auto point : sectionContour(p, i, top[i], bottom[i])) { points.push_back(drawing.pixel(point)); }	// Повторяет исходную границу без изменения карты
+        Polygon(dc, points.data(), static_cast<int>(points.size()));	// Обводит участок после фазовой окраски
+    }	// Завершает текущий блок обработки
+    drawing.box(-8, 0, 8, bottom[1] + p.dimensions[2].height * 0.2, paint, MoldPart::rod);	// Показывает условный сигнальный стержень
     SetBkMode(dc, TRANSPARENT); SetTextAlign(dc, TA_CENTER | TA_TOP);	// Подготавливает постоянную нумерацию отделений
-    SetTextColor(dc, RGB(20, 35, 45));	// Выбирает читаемый цвет цифровых обозначений
+    SetTextColor(dc, RGB(0, 0, 0));	// Выбирает читаемый цвет цифровых обозначений
     for (std::size_t i = 0; i < sectionCount; ++i) {	// Размещает номера внутри соответствующих полостей
         const auto position = drawing.pixel({-p.dimensions[i].diameter * 0.14, (top[i] + bottom[i]) / 2});	// Отводит номер от сигнального стержня
         const wchar_t number[]{static_cast<wchar_t>(L'1' + i), 0};	// Формирует обозначение от одного до пяти
         TextOutW(dc, position.x, position.y - 7, number, 1);	// Сохраняет номер видимым без наведения мыши
     }	// Завершает текущий блок обработки
     static_cast<void>(cursor); RestoreDC(dc, saved);	// Возвращает контекст вызывающему окну
-    for (const auto brush : {colors[0], colors[1], colors[2], muted, hatch, dots, paint, fastener}) { DeleteObject(brush); }	// Освобождает созданные кисти текущего кадра
+    for (const auto brush : {colors[0], colors[1], colors[2], muted, hatch, dots, paint, fastener, bricks}) { DeleteObject(brush); }	// Освобождает созданные кисти текущего кадра
     DeleteObject(outline); DeleteObject(mutedOutline);	// Освобождает контурные перья
 }	// Завершает текущий блок обработки

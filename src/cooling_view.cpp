@@ -56,7 +56,7 @@ void drawSingleChart(HDC dc, const RECT& area, const Project& inputs, const Run*
     FrameRect(dc, &area, GetSysColorBrush(COLOR_3DSHADOW));	// Описывает параметры текущего действия
     LOGFONTW font{}; GetObjectW(GetStockObject(DEFAULT_GUI_FONT), sizeof(font), &font);	// Описывает параметры текущего действия
     const auto originalFont = GetCurrentObject(dc, OBJ_FONT);	// Сохраняет системный шрифт подписей
-    font.lfHeight = -13; font.lfWeight = FW_NORMAL; font.lfEscapement = 900; font.lfOrientation = 900;	// Поворачивает подпись оси объема вертикально
+    font.lfEscapement = 900; font.lfOrientation = 900;	// Поворачивает подпись оси объема вертикально
     const HFONT vertical = CreateFontIndirectW(&font); SelectObject(dc, vertical);	// Описывает параметры текущего действия
     label(dc, area.left + 11, (plot.top + plot.bottom) / 2, metric == LayerMetric::volume ? L"Объем, м3" : L"Толщина, мм");	// Настраивает отображение текущего элемента
     SelectObject(dc, originalFont); DeleteObject(vertical);	// Описывает параметры текущего действия
@@ -97,8 +97,7 @@ void drawSingleChart(HDC dc, const RECT& area, const Project& inputs, const Run*
         SetTextAlign(dc, TA_LEFT | TA_TOP);	// Описывает параметры текущего действия
     }	// Завершает текущий блок обработки
     SetTextAlign(dc, TA_LEFT | TA_TOP);	// Описывает параметры текущего действия
-    int count = 0; for (unsigned z = 0; z < 3; ++z) { count += (layers >> z) & 1; }	// Подсчитывает видимые элементы легенды
-    int slot = 0; const int left = (area.left + area.right - count * 118) / 2;	// Центрирует выбранные слои под графиком
+    int slot = 0; const int left = plot.left;	// Начинает легенду под нулевой отметкой времени
     for (const auto z : legendOrder) {	// Показывает жидкий двухфазный затем твердый слой
         if (layers & (1u << z)) { colorKey(dc, left + slot++ * 118, area.bottom - 25, colors[z], layerNames[z]); }	// Согласует легенду с отмеченными кривыми
     }	// Завершает текущий блок обработки

@@ -54,7 +54,7 @@ std::string rtfEscape(const std::wstring& text) {	// Преобразует ру
     return value;	// Возвращает безопасный текст RTF
 }	// Завершает текущий блок обработки
 std::string document(bool calculations, int width) {	// Настраивает отображение текущего элемента
-    std::string rtf = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}{\\f1 Cambria Math;}{\\f2 Consolas;}}{\\colortbl;\\red25\\green42\\blue55;\\red26\\green78\\blue115;\\red243\\green246\\blue248;}\\viewkind4\\uc1 ";	// Настраивает шрифты и сдержанные цвета
+    std::string rtf = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}{\\f1 Cambria Math;}{\\f2 Consolas;}}{\\colortbl;\\red25\\green42\\blue55;\\red0\\green0\\blue0;\\red243\\green246\\blue248;}\\viewkind4\\uc1 ";	// Настраивает шрифты и сдержанные цвета
     int equation = 0;	// Нумерует формулы последовательно внутри расчетной вкладки
     for (const auto& block : aboutContent(calculations)) {	// Выводит материал в заданном порядке
         const auto text = rtfEscape(block.text);	// Преобразует содержание выбранного блока
