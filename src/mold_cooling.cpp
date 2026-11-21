@@ -5,7 +5,7 @@
 #include <utility>																																					// Перемещает временную историю без копирования кадров
 double cylinderVolume(const SectionDimensions& dimensions) {																										// Переводит геометрию в полный объём металла
     const double radius = dimensions.diameter / 2000.0;																												// Переводит диаметр в радиус в метрах
-    const double length = dimensions.height / 1000.0;																												// Переводит высоту в метры
+    const double length = dimensions.height / 1000.0;																												// Переводит осевую длину в метры
     return std::numbers::pi * radius * radius * length;																												// Умножает площадь основания на длину
 }																																									// Завершает расчёт полного объёма
 PhaseVolumes phaseVolumes(const SectionDimensions& dimensions, const CoolingSample& sample) {																		// Оценивает объёмы фаз выбранного отделения
@@ -16,7 +16,7 @@ PhaseVolumes phaseVolumes(const SectionDimensions& dimensions, const CoolingSamp
 bool MoldCooling::refresh(const MoldDimensions& dimensions, bool circulation) {																						// Готовит согласованное обновление расчёта формы
     std::array<std::optional<CoolingResult>, demoDimensions.size()> pending;																						// Хранит новые истории до успешного расчёта
     bool changed = false;																																			// Отмечает необходимость обновить шкалу времени
-    for (std::size_t i = 0; i < dimensions.size(); ++i) {																											// Сравнивает размеры всех четырёх отделений
+    for (std::size_t i = 0; i < dimensions.size(); ++i) {																											// Сравнивает размеры всех пяти отделений
         const int diameter = dimensions[i].diameter;																												// Читает диаметр этого расчётного цилиндра
         if (diameter <= 0 || dimensions[i].height <= 0) {																											// Проверяет положительность размеров каждого отделения
             throw std::invalid_argument("Invalid section dimensions");																								// Отклоняет некорректную геометрию формы
@@ -45,7 +45,7 @@ const CoolingResult& MoldCooling::section(std::size_t index) const {												
 }																																									// Завершает выбор расчётной истории
 PhaseVolumes MoldCooling::totalVolumes(const MoldDimensions& dimensions, std::size_t frame) const {																	// Суммирует объёмы по отделениям формы
     PhaseVolumes total{};																																			// Начинает суммирование с пустого объёма
-    for (std::size_t i = 0; i < histories.size(); ++i) {																											// Обходит четыре отделения без литниковых каналов
+    for (std::size_t i = 0; i < histories.size(); ++i) {																											// Обходит пять отделений без литниковых каналов
         const auto volumes = phaseVolumes(dimensions[i], histories[i].samples.at(frame));																			// Берёт фазовые объёмы общего момента
         total.solid += volumes.solid;																																// Прибавляет твёрдый металл текущего отделения
         total.liquid += volumes.liquid;																																// Прибавляет жидкий металл текущего отделения
@@ -62,20 +62,24 @@ std::optional<double> MoldCooling::completedAt() const {																								
     }																																								// Завершает сравнение времён всех отделений
     return latest;																																					// Возвращает окончание затвердевания последнего отделения
 }																																									// Завершает расчёт времени затвердевания формы
-void MoldCooling::calculate(const Project& p, std::stop_token stop) {																						// Рассчитывает все отделения пользовательского проекта
-    validateProject(p);																																		// Проверяет согласованность физических исходных данных
-    MoldCooling pending;																																	// Подготавливает новый результат независимо от старого
-    for (std::size_t i = 0; i < 4; ++i) {																													// Обходит четыре отделения формы
-        const double radius = p.dimensions[i].diameter / 2000.0;																							// Переводит диаметр металла в радиус
-        const CoolingLayer layers[]{																														// Собирает слои соответствующего отделения
-            {radius, p.materials[0].conductivity, p.materials[0].density, p.materials[0].heatCapacity, p.metalTemperature, p.cells},						// Задаёт металл и его радиальную сетку
-            {p.sand[i] / 1000, p.materials[1].conductivity, p.materials[1].density, p.materials[1].heatCapacity, p.formTemperature, 16},					// Задаёт песок с индивидуальной толщиной
-            {p.flask[i] / 1000, p.materials[2].conductivity, p.materials[2].density, p.materials[2].heatCapacity, p.formTemperature, 8},					// Задаёт металлическую опоку отделения
-        };																																					// Завершает набор слоёв
-        const CoolingBoundary boundary{p.airTemperature, p.externalTransfer, p.hours * 3600, p.step, p.metalContact, p.formContact, true};					// Задаёт время и условия сопряжённого теплообмена
-        const auto motion = p.circulation ? std::optional<MeltCirculation>{{p.dimensions[i].height / 1000.0}} : std::nullopt;								// Выбирает модель циркуляции расплава
-        pending.histories[i] = solveCooling(layers, boundary, p.phase, motion, stop);																		// Решает баланс энтальпии данного отделения
-    }																																						// Завершает расчёт всех отделений
-    pending.configured = true;																																// Отмечает пользовательскую постановку
-    *this = std::move(pending);																																// Публикует только согласованный полный результат
-}																																							// Завершает расчёт пользовательского проекта
+void MoldCooling::calculate(const Project& p, std::stop_token stop) {	// Рассчитывает пять отделений монолитного валка
+    validateProject(p);	// Проверяет входы до изменения сохранённой истории
+    MoldCooling pending;	// Собирает новый согласованный результат отдельно
+    for (std::size_t i = 0; i < sectionCount; ++i) {	// Обходит отделения от прибыли вниз
+        const auto& metal = p.materials[0];	// Выбирает единственный сплав всего валка
+        const auto& paint = p.materials[1];	// Выбирает теплоизоляционную краску
+        const auto& iron = p.materials[2];	// Выбирает материал кокиля и опок
+        const auto& form = p.materials[i == 2 ? 2 : 3];	// Окружает бочку кокилем остальные участки песком
+        const double radius = p.dimensions[i].diameter / 2000.0;	// Вычисляет радиус металлического отделения
+        std::vector<CoolingLayer> layers{{radius, metal.conductivity, metal.density, metal.heatCapacity, p.metalTemperature, metalCells(p, i)}};	// Создаёт металлические кольца заданной сетки
+        if (p.coating > 0) {	// Добавляет физически присутствующее покрытие
+            layers.push_back({p.coating / 1000, paint.conductivity, paint.density, paint.heatCapacity, p.formTemperature, 2});	// Представляет краску двумя конечными объёмами
+        }	// Завершает проверку наличия краски
+        layers.push_back({(i == 2 ? p.chill : p.sand) / 1000, form.conductivity, form.density, form.heatCapacity, p.formTemperature, 32});	// Добавляет основной охлаждающий слой формы
+        layers.push_back({(i == 2 ? p.barrelFlask : p.flask) / 1000, iron.conductivity, iron.density, iron.heatCapacity, p.formTemperature, 8});	// Добавляет наружную металлическую опоку
+        const CoolingBoundary boundary{p.airTemperature, p.externalTransfer, p.hours * 3600, p.step, 0, 0, true};	// Задаёт наружную теплоотдачу и идеальные контакты
+        pending.histories[i] = solveCooling(layers, boundary, p.phase, std::nullopt, stop);	// Решает теплопроводность без движения расплава
+    }	// Завершает пять независимых радиальных расчётов
+    pending.configured = true;	// Отмечает пользовательскую постановку
+    *this = std::move(pending);	// Публикует только полностью рассчитанный набор
+}	// Завершает расчёт монолитного валка

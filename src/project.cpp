@@ -1,61 +1,70 @@
-#include "project.h"																																		// Подключает структуру входных данных
-#include <algorithm>																																		// Ограничивает доли заполнения
-#include <cmath>																																			// Проверяет конечность физических значений
-#include <numbers>																																			// Предоставляет число пи
-#include <stdexcept>																																		// Сообщает о недопустимых исходных данных
-namespace {																																					// Ограничивает видимость проверки диапазона
-void range(double value, double minimum, double maximum) {																									// Проверяет конечность и числовой диапазон
-    if (!std::isfinite(value) || value < minimum || value > maximum) {																						// Обнаруживает недопустимое значение
-        throw std::invalid_argument("Параметр находится вне допустимого диапазона");																		// Передаёт причину отказа интерфейсу
-    }																																						// Завершает проверку диапазона
-}																																							// Завершает проверку одного числа
-}																																							// Завершает область внутренних функций
-void validateProject(const Project& p) {																													// Проверяет согласованность полного набора входов
-    if (p.name.empty() || p.name.size() > 1024 || p.source.size() > 4096) {																					// Проверяет длину текстовых полей
-        throw std::invalid_argument("Укажите название расчёта допустимой длины");																			// Объясняет ошибку названия
-    }																																						// Завершает проверку текста
-    for (std::size_t i = 0; i < 4; ++i) {																													// Проверяет четыре цилиндрических отделения
-        range(p.dimensions[i].diameter, 1, 9999);																											// Проверяет диаметр в миллиметрах
-        range(p.dimensions[i].height, 1, 9999);																												// Проверяет осевую длину в миллиметрах
-        range(p.sand[i], 0.1, 9999);																														// Проверяет толщину песчаного слоя
-        range(p.flask[i], 0.1, 9999);																														// Проверяет толщину металлической опоки
-    }																																						// Завершает проверку геометрии
-    for (const auto& material : p.materials) {																												// Проверяет свойства всех трёх материалов
-        range(material.density, 1, 30000);																													// Ограничивает плотность поддерживаемой областью
-        range(material.heatCapacity, 1, 100000);																											// Проверяет положительную теплоёмкость
-        range(material.conductivity, 0.001, 10000);																											// Проверяет положительную теплопроводность
-    }																																						// Завершает проверку материалов
-    range(p.solidDensity, 0, 30000);																														// Разрешает отключение оценки усадки нулём
-    range(p.phase.solidus, -273, 4000);																														// Проверяет температуру солидуса
-    range(p.phase.liquidus, -273, 4000);																													// Проверяет температуру ликвидуса
-    range(p.phase.latentHeat, 1, 10000000);																													// Проверяет скрытую теплоту превращения
-    range(p.metalTemperature, p.phase.liquidus, 4000);																										// Требует жидкий металл при завершении заполнения
-    range(p.formTemperature, -273, 4000);																													// Проверяет начальную температуру формы
-    range(p.airTemperature, -273, 4000);																													// Проверяет температуру окружающей среды
-    range(p.metalContact, 0, 10000000);																														// Разрешает идеальный контакт нулевым значением
-    range(p.formContact, 0, 10000000);																														// Проверяет контакт между слоями формы
-    range(p.externalTransfer, 0, 100000);																													// Разрешает теплоизолированную наружную поверхность
-    range(p.hours, 0.001, 360);																																// Ограничивает длительность хранимой истории
-    range(p.step, 0.01, 3600);																																// Проверяет положительный шаг времени
-    range(p.cells, 8, 256);																																	// Ограничивает разрешение радиальной сетки
-    range(p.fillingSeconds, 1, 7200);																														// Проверяет длительность анимации заполнения
-    if (p.phase.solidus >= p.phase.liquidus || std::ceil(p.hours * 3600 / p.step) > 20000) {																// Проверяет интервал превращения и объём памяти
-        throw std::invalid_argument("Проверьте солидус, ликвидус и число временных кадров");																// Объясняет несогласованность настроек
-    }																																						// Завершает проверку связанных параметров
-}																																							// Завершает проверку проекта
-std::array<double, 4> filledSections(const Project& p, double progress) {																					// Заполняет отделения снизу по постоянному расходу
-    std::array<double, 4> volumes{};																														// Хранит полные объёмы отделений
-    double total = 0;																																		// Начинает суммирование объёма металла
-    for (std::size_t i = 0; i < 4; ++i) {																													// Вычисляет объёмы цилиндрической модели
-        const double radius = p.dimensions[i].diameter / 2000.0;																							// Переводит диаметр в радиус в метрах
-        volumes[i] = std::numbers::pi * radius * radius * p.dimensions[i].height / 1000;																	// Вычисляет объём цилиндра в кубометрах
-        total += volumes[i];																																// Прибавляет объём отделения
-    }																																						// Завершает вычисление полного объёма
-    double remaining = total * std::clamp((progress - 0.2) / 0.8, 0.0, 1.0);																				// Отводит начало анимации заполнению литников
-    for (std::size_t i = 0; i < 4; ++i) {																													// Заполняет нижние отделения прежде верхних
-        const double filled = std::min(remaining, volumes[i]);																								// Определяет поступивший объём металла
-        remaining -= filled;																																// Передаёт остаток следующему отделению
-        volumes[i] = filled / volumes[i];																													// Возвращает долю заполнения отделения
-    }																																						// Завершает объёмный баланс заполнения
-    return volumes;																																			// Возвращает четыре доли заполнения
-}																																							// Завершает расчёт анимационного заполнения
+#include "project.h"	// Подключает параметры монолитного валка
+#include <algorithm>	// Ограничивает степень заполнения и размеры
+#include <cmath>	// Проверяет числа и округляет сетку
+#include <numbers>	// Предоставляет постоянную пи
+#include <stdexcept>	// Сообщает о недопустимых входных данных
+namespace {	// Скрывает внутреннюю проверку диапазона
+void range(double value, double minimum, double maximum) {	// Проверяет одно конечное числовое значение
+    if (!std::isfinite(value) || value < minimum || value > maximum) {	// Отклоняет недопустимые числовые параметры
+        throw std::invalid_argument("Параметр выходит за допустимый диапазон");	// Объясняет отказ применения значений
+    }	// Завершает проверку диапазона
+}	// Завершает внутреннюю проверку
+}	// Завершает пространство внутренних функций
+int metalCells(const Project& p, std::size_t section) {	// Переводит диаметральный шаг в число колец
+    return static_cast<int>(std::ceil(p.dimensions.at(section).diameter / p.diameterStep));	// Делит радиус с шагом не больше ΔD/2
+}	// Завершает определение радиальной сетки
+double outerDiameter(const Project& p) {	// Рассчитывает внешний размер формы
+    double diameter = 0;	// Начинает поиск наибольшего наружного диаметра
+    for (std::size_t i = 0; i < sectionCount; ++i) {	// Рассматривает каждый поперечный участок
+        const double wall = p.coating + (i == 2 ? p.chill + p.barrelFlask : p.sand + p.flask);	// Складывает действующие радиальные слои
+        diameter = std::max(diameter, p.dimensions[i].diameter + 2 * wall);	// Учитывает стенки с обеих сторон
+    }	// Завершает поиск внешнего габарита
+    return diameter;	// Возвращает D0 без литниковой трубы
+}	// Завершает вычисление наружного диаметра
+double totalLength(const Project& p) {	// Вычисляет общий осевой размер L0
+    double length = 0;	// Начинает сумму длин с нуля
+    for (const auto& d : p.dimensions) { length += d.height; }	// Складывает длины всех пяти отделений
+    return length;	// Возвращает осевую длину в миллиметрах
+}	// Завершает суммирование длин
+void validateProject(const Project& p) {	// Проверяет согласованность расчётного проекта
+    range(p.diameterStep, 0.1, 1000);	// Проверяет положительный шаг по диаметру
+    double nodes = 0;	// Оценивает сохраняемую размерность профилей
+    for (std::size_t i = 0; i < sectionCount; ++i) {	// Проверяет каждое отделение отдельно
+        range(p.dimensions[i].diameter, 1, 9999);	// Ограничивает целочисленный диаметр в миллиметрах
+        range(p.dimensions[i].height, 1, 9999);	// Ограничивает осевую длину отделения
+        range(metalCells(p, i), 2, 4096);	// Ограничивает сетку металлического сечения
+        nodes += metalCells(p, i) + 2;	// Учитывает центры колец ось и стенку
+    }	// Завершает проверку пяти цилиндров
+    range(p.chill, 0.1, 2000); range(p.coating, 0, 100);	// Проверяет кокиль и необязательное покрытие
+    range(p.barrelFlask, 0.1, 1000); range(p.flask, 0.1, 1000);	// Проверяет стенки обеих разновидностей опок
+    range(p.sand, 0.1, 2000); range(p.pipeDiameter, 1, 1000);	// Проверяет форму и литниковую трубу
+    for (const auto& m : p.materials) {	// Проверяет четыре материала расчётной области
+        range(m.density, 1, 30000); range(m.heatCapacity, 1, 100000);	// Проверяет запасание энергии материалом
+        range(m.conductivity, 0.001, 10000);	// Проверяет способность материала проводить теплоту
+    }	// Завершает проверку теплофизических свойств
+    range(p.phase.solidus, -273, 4000); range(p.phase.liquidus, -273, 4000);	// Проверяет конечность фазовых температур
+    range(p.phase.latentHeat, 1, 10000000);	// Проверяет положительную теплоту кристаллизации
+    range(p.metalTemperature, p.phase.liquidus, 4000);	// Требует первоначально жидкий металл
+    range(p.formTemperature, -273, 4000); range(p.airTemperature, -273, 4000);	// Проверяет начальные температуры внешних материалов
+    range(p.externalTransfer, 0, 100000);	// Разрешает наружную теплоизоляцию нулём
+    range(p.hours, 0.001, 360); range(p.step, 0.01, 3600);	// Проверяет горизонт и шаг времени
+    const double frames = std::ceil(p.hours * 3600 / p.step) + 1;	// Оценивает число сохранённых моментов
+    if (p.phase.solidus >= p.phase.liquidus || frames > 20001 || frames * nodes * sizeof(float) > 256 * 1024 * 1024) {	// Ограничивает фазовый интервал и память истории
+        throw std::invalid_argument("Проверьте солидус, ликвидус, шаг сетки и время расчёта");	// Объясняет несовместимость выбранных параметров
+    }	// Завершает проверку согласованности и памяти
+}	// Завершает проверку всего проекта
+std::array<double, sectionCount> filledSections(const Project& p, double progress) {	// Вычисляет наглядное заполнение монолитной отливки
+    std::array<double, sectionCount> fractions{};	// Подготавливает объёмы пяти отделений
+    double total = 0;	// Исключает литниковую систему из суммы
+    for (std::size_t i = 0; i < sectionCount; ++i) {	// Находит вместимость каждого цилиндра
+        const double radius = p.dimensions[i].diameter / 2000.0;	// Переводит диаметр в радиус метрами
+        fractions[i] = std::numbers::pi * radius * radius * p.dimensions[i].height / 1000;	// Вычисляет объём отделения в кубометрах
+        total += fractions[i];	// Добавляет объём к вместимости валка
+    }	// Завершает расчёт вместимостей
+    double remaining = total * std::clamp((progress - 0.2) / 0.8, 0.0, 1.0);	// Оставляет начало сценария литниковому пути
+    for (std::size_t i = sectionCount; i-- > 0;) {	// Заполняет отделения от нижней шейки вверх
+        const double filled = std::min(remaining, fractions[i]);	// Ограничивает поступление вместимостью отделения
+        remaining -= filled; fractions[i] = filled / fractions[i];	// Вычисляет долю заполнения цилиндра
+    }	// Завершает движение уровня снизу вверх
+    return fractions;	// Возвращает согласованные доли заполнения
+}	// Завершает сценарий заполнения

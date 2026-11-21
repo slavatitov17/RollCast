@@ -4,9 +4,9 @@
 #endif																					// Завершает выбор настройки заголовка Windows
 #include <windows.h>																	// Объявляет контекст рисования и прямоугольник Windows
 #include <vector>																		// Хранит области подсказок в порядке рисования
-#include "project.h"																																		// Подключает общие размеры четырёх отделений
+#include "project.h"																																		// Подключает общие размеры пяти отделений
 enum class MoldPart {																	// Перечисляет зоны разреза с подсказками
-    none,																				// Обозначает свободное пространство вокруг формы
+    none, profit,																				// Обозначает свободное пространство вокруг формы
     riser, upperModel, funnel, pipe, upperFrame, rod,									// Перечисляет верхние элементы формы и сифона
     plug, chill, barrel, lowerModelMiddle, middleFrame,									// Перечисляет элементы вокруг бочки
     lowerModelBottom, flask, plate, gate, elbow											// Перечисляет нижние элементы литниковой системы
@@ -32,10 +32,10 @@ private:																				// Скрывает детали хранения о
 };																						// Завершает описание карты подсказок
 struct MoldFrame {																																			// Задаёт окраску и заполнение формы
     double filling = 1;																																		// Хранит прогресс заливки от нуля до единицы
-    std::array<double, 4> filled{1, 1, 1, 1};																												// Хранит заполнение цилиндрических отделений
-    std::array<const CoolingSample*, 4> samples{};																											// Передаёт рассчитанные профили общего момента
+    std::array<double, sectionCount> filled{1, 1, 1, 1, 1};																												// Хранит заполнение цилиндрических отделений
+    std::array<const CoolingSample*, sectionCount> samples{};																											// Передаёт рассчитанные профили общего момента
     PhaseChange phase = demoPhase;																															// Хранит фазовые границы текущего проекта
 };																																							// Завершает состояние визуализации металла
-void drawMold(HDC device, const RECT& area, const MoldDimensions& dimensions,																				// Принимает область и геометрию разреза
+void drawMold(HDC device, const RECT& area, const Project& project,																				// Принимает область и геометрию разреза
     MoldHitMap& hits, MoldPart hovered, POINT cursor, const MoldFrame& frame = {}, bool rebuild = true);													// Рисует форму и текущее состояние металла
 void drawMoldLabel(HDC device, const RECT& area, MoldPart part, POINT cursor);																				// Рисует подпись поверх кэшированной формы

@@ -4,3 +4,5 @@
 /RollCast.exe
 # Личная закреплённая база расчётов
 /.rollcast-base.roll
+# Личная база ветки с пятью отделениями
+/.rollcast-base-v2.roll

@@ -196,7 +196,8 @@ CoolingResult solveCooling(std::span<const CoolingLayer> layers, CoolingBoundary
             profile.back() = {grid[metalEnd].outer, surface};																												// Добавляет температуру боковой стенки
             sample.phase = summarizePhases(profile, *phase);																								// Вычисляет зоны и интегральные фазовые доли
             if (boundary.recordProfile) {																													// Сохраняет профиль только для визуализации
-                sample.profile = profile;																													// Копирует температуры узлов радиальной сетки
+                sample.profile.reserve(profile.size());	// Выделяет компактную историю температур
+                for (const auto& node : profile) { sample.profile.push_back(static_cast<float>(node.temperature)); }																													// Копирует температуры узлов радиальной сетки
             }																																				// Завершает сохранение профиля
             if (!result.completedAt && sample.phase.hottestTemperature <= phase->solidus) {																					// Определяет достижение солидуса везде
                 double completion = seconds;																																// Принимает время текущего кадра

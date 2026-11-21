@@ -102,7 +102,7 @@ void checkCirculation() {																																		// Проверяет
 }																																								// Завершает контроль конвекции расплава
 void checkMoldCooling() {																																		// Проверяет общую шкалу и объёмы четырёх цилиндров
     MoldCooling cooling;																																		// Создаёт пустой набор расчётов формы
-    auto dimensions = demoDimensions;																															// Загружает демонстрационную геометрию формы
+    MoldDimensions dimensions{{{460, 704}, {560, 765}, {920, 1310}, {520, 410}, {520, 410}}};																															// Загружает демонстрационную геометрию формы
     require(cooling.refresh(dimensions) && cooling.sampleCount() == 4321, "Missing mold history");																// Проверяет общий размер истории
     double volume = 0;																																			// Начинает суммирование полного объёма формы
     double latest = 0;																																			// Запоминает самое позднее затвердевание
@@ -117,7 +117,7 @@ void checkMoldCooling() {																																		// Проверяет
         }																																						// Завершает поиск самого позднего отделения
         volume += cylinderVolume(dimensions[i]);																												// Прибавляет полный геометрический объём отделения
     }																																							// Завершает проверку всех расчётных историй
-    require(cooling.completedAt() == latest && cooling.section(1).completedAt == latest, "Incorrect mold completion");											// Проверяет окончание по последнему отделению
+    require(cooling.completedAt() == latest && cooling.section(2).completedAt == latest, "Incorrect mold completion");											// Проверяет окончание по последнему отделению
     const auto initial = cooling.totalVolumes(dimensions, 0);																									// Проверяет общий исходный жидкий объём
     const auto intermediate = cooling.totalVolumes(dimensions, middle);																							// Проверяет смесь в промежуточном кадре
     const auto final = cooling.totalVolumes(dimensions, cooling.sampleCount() - 1);																				// Проверяет общий конечный твёрдый объём
@@ -125,18 +125,18 @@ void checkMoldCooling() {																																		// Проверяет
     require(std::abs(intermediate.solid + intermediate.liquid - volume) < 1e-10, "Intermediate volume mismatch");												// Сверяет сумму двух фаз
     require(std::abs(final.solid - volume) < 1e-10 && final.liquid < 1e-10, "Invalid final mold volume");														// Сверяет полностью затвердевшую форму
     const auto* lower = cooling.section(0).samples.data();																										// Запоминает сохранённую историю нижней шейки
-    const auto* barrel = cooling.section(1).samples.data();																										// Запоминает сохранённую историю бочки
-    const auto upperBefore = phaseVolumes(dimensions[2], cooling.section(2).samples[middle]);																	// Запоминает объёмы верхней шейки
-    dimensions[2].height *= 2;																																	// Удваивает только высоту верхней шейки
-    require(!cooling.refresh(dimensions) && cooling.section(1).samples.data() == barrel, "Height recalculated history");										// Проверяет сохранение температурной истории
-    const auto upperAfter = phaseVolumes(dimensions[2], cooling.section(2).samples[middle]);																	// Вычисляет объёмы увеличенной шейки
+    const auto* barrel = cooling.section(2).samples.data();																										// Запоминает сохранённую историю бочки
+    const auto upperBefore = phaseVolumes(dimensions[1], cooling.section(1).samples[middle]);																	// Запоминает объёмы верхней шейки
+    dimensions[1].height *= 2;																																	// Удваивает только осевую длину верхней шейки
+    require(!cooling.refresh(dimensions) && cooling.section(2).samples.data() == barrel, "Height recalculated history");										// Проверяет сохранение температурной истории
+    const auto upperAfter = phaseVolumes(dimensions[1], cooling.section(1).samples[middle]);																	// Вычисляет объёмы увеличенной шейки
     require(std::abs(upperAfter.solid - 2 * upperBefore.solid) < 1e-10 &&																						// Проверяет увеличение твёрдого объёма
         std::abs(upperAfter.liquid - 2 * upperBefore.liquid) < 1e-10, "Height did not scale phase volumes");													// Проверяет увеличение жидкого объёма
-    dimensions[1].diameter = 9999;																																// Задаёт бочку с затвердеванием позже горизонта
+    dimensions[2].diameter = 9999;																																// Задаёт бочку с затвердеванием позже горизонта
     require(cooling.refresh(dimensions) && cooling.section(0).samples.data() == lower, "Unchanged history was replaced");										// Проверяет выборочный пересчёт
-    require(!cooling.section(1).completedAt && !cooling.completedAt(), "Mold completion outside the horizon");													// Проверяет недостигнутое общее затвердевание
+    require(!cooling.section(2).completedAt && !cooling.completedAt(), "Mold completion outside the horizon");													// Проверяет недостигнутое общее затвердевание
     std::cout << "Mold volume and completion seconds: " << volume << ' ' << latest << '\n';																		// Выводит объём и время учебной формы
-}																																								// Завершает контроль четырёх отделений формы
+}																																								// Завершает контроль пяти отделений формы
 }																																								// Завершает область контрольных примеров
 int main() {																																					// Запускает контрольные примеры расчётного модуля
     try {																																						// Перехватывает ошибки контрольных проверок

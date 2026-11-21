@@ -16,9 +16,9 @@ public:																																						// Открывает расчёт 
     PhaseVolumes totalVolumes(const MoldDimensions& dimensions, std::size_t frame) const;		// Суммирует фазовые объёмы формы
     std::optional<double> completedAt() const;													// Находит момент полного затвердевания всех отделений
 private:																						// Хранит данные только для внутреннего обновления
-    std::array<CoolingResult, demoDimensions.size()> histories{};								// Сохраняет результаты по отделениям снизу вверх
+    std::array<CoolingResult, demoDimensions.size()> histories{};								// Сохраняет результаты по номерам сверху вниз
     bool configured = false;																																// Различает пользовательские и демонстрационные истории
     bool hasCirculation = false;																// Запоминает режим сохранённых историй
-    std::array<int, 4> lengths{};																// Запоминает длины для модели движения
+    std::array<int, sectionCount> lengths{};																// Запоминает длины для модели движения
     std::array<int, demoDimensions.size()> diameters{};											// Запоминает диаметры рассчитанных отделений
 };																								// Завершает описание расчёта формы

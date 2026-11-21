@@ -32,7 +32,7 @@ struct CoolingSample {																																			// Хранит тем�
     double surfaceTemperature;																																	// Хранит температуру металла на боковой стенке
     PhaseSummary phase{};																																		// Хранит распределение фаз в текущий момент
     double circulationSpeed = 0;																																// Хранит масштаб скорости учебной циркуляции
-    std::vector<RadialTemperature> profile{};																												// Хранит радиальный профиль для цветной схемы
+    std::vector<float> profile{};																												// Хранит температуры профиля для цветной схемы
 };																																								// Завершает описание отсчёта температуры
 struct CoolingResult {																																			// Объединяет историю температур и проверку баланса
     std::vector<CoolingSample> samples;																															// Хранит начальный и последующие отсчёты
