@@ -235,8 +235,7 @@ void createControls(HWND window, AppState& state) {	// Создает компа
     const HWND metric = control(window, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, 0, 0, 130, 100, 304);	// Создает переключатель показателя готовых данных
     for (const auto* name : {L"Объем, м3", L"Толщина, мм"}) { SendMessageW(metric, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name)); }	// Предлагает две согласованные системы единиц
     SendMessageW(metric, CB_SETCURSEL, 0, 0);	// Начинает с объемов слоев
-    control(window, L"STATIC", L"Слой", 0, 0, 0, 40, 22, 307);	// Подписывает независимый выбор кривых
-    control(window, L"BUTTON", L"Все ▾", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 100, 24, 305);	// Открывает список с несколькими отмеченными слоями
+    control(window, L"BUTTON", L"Все слои ▾", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 100, 24, 305);	// Открывает список с несколькими отмеченными слоями
     showTab(state, 0); writeProject(window, state, state.inputs);	// Заполняет исходные поля без запуска вычислений
 }	// Завершает текущий блок обработки
 std::size_t frameIndex(const AppState& state) {	// Сопоставляет ползунок кадру охлаждения
@@ -267,7 +266,6 @@ void arrange(HWND window, AppState& state) {	// Размещает постоя�
     MoveWindow(GetDlgItem(window, 304), areas.results.left + 88, areas.results.top + 8, 125, 100, TRUE);	// Сохраняет место для правой метки времени
     MoveWindow(GetDlgItem(window, 208), card.left + 12, card.top + 15, 52, 22, TRUE);	// Подписывает участок в общей строке управления
     MoveWindow(GetDlgItem(window, chartPicker), card.left + 65, card.top + 10, 55, 180, TRUE);	// Показывает только номер участка
-    MoveWindow(GetDlgItem(window, 307), card.right - 399, card.top + 15, 35, 22, TRUE);	// Подписывает раскрывающийся выбор слоев
     MoveWindow(GetDlgItem(window, 305), card.right - 358, card.top + 10, 104, 26, TRUE);	// Приближает выбор слоев к масштабу
     MoveWindow(GetDlgItem(window, firstExport), card.right - 116, card.top + 10, 105, 26, TRUE);	// Выравнивает выгрузку с остальными элементами
     MoveWindow(GetDlgItem(window, 301), card.right - 247, card.top + 10, 25, 26, TRUE);	// Приближает масштаб к кнопке выгрузки
@@ -386,14 +384,14 @@ void action(HWND window, AppState& state, int id) {	// Выполняет ком
     }	// Завершает текущий блок обработки
     if (id == 305) {	// Открывает отмечаемый список слоев графика
         const HMENU menu = CreatePopupMenu();	// Создает штатное раскрывающееся меню
-        AppendMenuW(menu, MF_STRING | (state.layers == 7 ? MF_CHECKED : 0), 400, L"Все");	// Отмечает одновременный выбор трех слоев
+        AppendMenuW(menu, MF_STRING | (state.layers == 7 ? MF_CHECKED : 0), 400, L"Все слои");	// Отмечает одновременный выбор трех слоев
         for (unsigned z = 0; z < 3; ++z) { AppendMenuW(menu, MF_STRING | ((state.layers & (1u << z)) ? MF_CHECKED : 0), 401 + z, layerNames[z]); }	// Сохраняет независимые отметки каждого слоя
         RECT anchor{}; GetWindowRect(GetDlgItem(window, 305), &anchor);	// Привязывает список к раскрывающей кнопке
         const int selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, anchor.left, anchor.bottom, 0, window, nullptr);	// Получает действие без изменения расчетного состояния
         DestroyMenu(menu);	// Освобождает временный список
         if (selected == 400) { state.layers = 7; }	// Выбирает сразу все кривые
         else if (selected >= 401 && selected <= 403) { state.layers ^= 1u << (selected - 401); }	// Переключает одну отметку сохраняя остальные
-        std::wstring caption = state.layers == 7 ? L"Все" : state.layers == 0 ? L"Не выбрано" : state.layers == 1 ? L"Твердый" : state.layers == 2 ? L"Двухфазный" : state.layers == 4 ? L"Жидкий" : L"Два слоя";	// Отражает текущий набор в закрытом списке
+        std::wstring caption = state.layers == 7 ? L"Все слои" : state.layers == 0 ? L"Не выбрано" : state.layers == 1 ? L"Твердый" : state.layers == 2 ? L"Двухфазный" : state.layers == 4 ? L"Жидкий" : L"Два слоя";	// Отражает текущий набор в закрытом списке
         SetDlgItemTextW(window, 305, (caption + L" ▾").c_str());	// Показывает выбранный набор без сброса момента
         const auto area = layout(window).results; InvalidateRect(window, &area, FALSE);	// Перерисовывает только представление результата
     }	// Завершает текущий блок обработки
