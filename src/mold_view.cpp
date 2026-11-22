@@ -132,17 +132,16 @@ double sectionRadius(const Project& p, std::size_t i, double t) {	// Опред�
     const auto radius = [&](std::size_t k) { return p.dimensions[k].diameter / 2.0; };	// Читает номинальные диаметры пяти расчетных цилиндров
     const double local = radius(i);	// Сохраняет номинальный радиус выбранного участка
     if (i <= 1) {	// Соединяет прибыль с верхней шейкой
-        const double u = (i == 0 ? t * p.dimensions[0].height : p.dimensions[0].height + t * p.dimensions[1].height) / (p.dimensions[0].height + p.dimensions[1].height);	// Находит положение вдоль обеих верхних частей
-        const double neck = radius(0) * (1 - u) + radius(1) * 0.84 * u;	// Повторяет плавное сужение исходной схемы
+        const double neck = local * 0.84;	// Сохраняет вертикальные стенки прибыли и верхней шейки
         const double blend = i == 1 ? std::clamp((t - 0.78) / 0.22, 0.0, 1.0) : 0;	// Выделяет скругленный переход к бочке
         return neck + (radius(2) - neck) * blend * blend;	// Раскрывает заделку к верхнему торцу бочки
     }	// Завершает текущий блок обработки
     if (i == 3) {	// Соединяет бочку с нижней шейкой
         const double blend = std::clamp(t / 0.22, 0.0, 1.0);	// Выделяет короткое скругление нижнего перехода
-        const double neck = local * (1 - 0.1 * t);	// Сужает верхнюю часть нижней шейки
+        const double neck = local * 0.9;	// Сохраняет вертикальную стенку нижней шейки
         return neck + (radius(2) - neck) * (1 - blend) * (1 - blend);	// Сохраняет касание бочки и плавный уступ
     }	// Завершает текущий блок обработки
-    if (i == 4) { return radius(3) * 0.9 * (1 - t) + local * 0.82 * t; }	// Продолжает уклон до нижнего конца модели
+    if (i == 4) { return local * 0.9; }	// Продолжает прямую стенку до нижнего конца
     return local;	// Оставляет рабочую бочку цилиндрической
 }	// Завершает текущий блок обработки
 std::vector<Location> sectionContour(const Project& p, std::size_t i, double top, double bottom, double inner = -1, double outer = 1) {	// Строит изменяемый контур полости либо полосы
@@ -176,7 +175,6 @@ const wchar_t* partName(MoldPart part) {	// Сопоставляет элеме�
         case MoldPart::funnel: return L"Воронка";	// Называет вход литниковой системы
         case MoldPart::pipe: return L"Литниковая труба";	// Называет вертикальную литниковую трубу
         case MoldPart::upperFrame: return L"Верхняя рамка";	// Называет рамку над кокилем
-        case MoldPart::rod: return L"«Сигналка»";	// Называет центральный контрольный стержень
         case MoldPart::plug: return L"Верхняя шейка (2)";	// Называет нижнюю зону модели верхней шейки
         case MoldPart::chill: return L"Кокиль";	// Называет обе боковые стенки бочки
         case MoldPart::barrel: return L"Бочка (3)";	// Называет центральную часть валка
@@ -238,6 +236,7 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
     const HBRUSH dots = createStipple(dc);	// Обозначает формовочную смесь точечным узором
     const HBRUSH paint = CreateSolidBrush(RGB(40, 40, 40));	// Показывает тонкий противопригарный слой темным
     const HBRUSH fastener = CreateHatchBrush(HS_FDIAGONAL, RGB(0, 0, 0));	// Меняет направление штрихов на креплениях
+    const HBRUSH refractory = CreateSolidBrush(RGB(255, 255, 255));	// Отделяет кладку воронки от полости заливки
     const HBRUSH bricks = createBricks(dc);	// Обозначает плиту кирпичным узором образца
     const auto empty = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));	// Оставляет полости белыми до начала заливки
     const Drawing drawing{dc, scale, area.left + 16 + (width - sceneWidth * scale) / 2 - minX * scale, area.top + 14 + (height - sceneHeight * scale) / 2 - funnelTop * scale, area, hits, hovered, outline, mutedOutline, muted, rebuild};	// Вписывает сборку единым преобразованием координат
@@ -246,8 +245,8 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
     const MoldPart casingParts[]{MoldPart::riser, MoldPart::upperFrame, MoldPart::chill, MoldPart::middleFrame, MoldPart::flask};	// Сохраняет названия окружающей оснастки
     const double barrelOuter = p.dimensions[2].diameter / 2.0 + p.coating + p.chill + p.barrelFlask;	// Сохраняет независимую толщину кокиля вокруг бочки
     const double shoulder = p.dimensions[2].diameter / 2.0 + p.coating + p.flask + 20;	// Вмещает переход к бочке внутри стенок
-    const double upperOuter = std::max(shoulder, std::max(p.dimensions[0].diameter, p.dimensions[1].diameter) / 2.0 + p.coating + p.sand + p.flask);	// Соединяет верхние стенки без случайных уступов
-    const double lowerOuter = std::max(shoulder, std::max(p.dimensions[3].diameter, p.dimensions[4].diameter) / 2.0 + p.coating + p.sand + p.flask);	// Соединяет нижние стенки общей опоки
+    const double upperOuter = std::max(std::max(shoulder, barrelOuter - 60), std::max(p.dimensions[0].diameter, p.dimensions[1].diameter) / 2.0 + p.coating + p.sand + p.flask);	// Соединяет верхние стенки без случайных уступов
+    const double lowerOuter = std::max(std::max(shoulder, barrelOuter - 55), std::max(p.dimensions[3].diameter, p.dimensions[4].diameter) / 2.0 + p.coating + p.sand + p.flask);	// Соединяет нижние стенки общей опоки
     const double bottomRight = pipe + pipeOuter + 55;	// Охватывает колено правой стенкой нижней опоки
     for (std::size_t i = 0; i < sectionCount; ++i) {	// Строит пять отделений по текущим размерам
         top[i] = i == 0 ? 0 : bottom[i - 1];	// Продолжает ось без осевых зазоров
@@ -266,11 +265,10 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
     drawing.box(minX, floor + base, maxX, floor + base + 40, bricks, MoldPart::plate);	// Рисует широкую плиту с кирпичными швами
     drawing.box(-lowerOuter - 35, floor + base - 25, bottomRight + 15, floor + base, hatch, MoldPart::flask);	// Показывает подошву нижней опоки над плитой
     drawing.shape({{-upperOuter - 165, 0}, {-upperOuter - 165, -85}, {upperOuter + 25, -45}, {upperOuter + 25, 0}, {upperOuter - p.flask, 0}, {upperOuter - p.flask, -25}, {-upperOuter + p.flask, -25}, {-upperOuter + p.flask, 0}}, fastener, MoldPart::riser);	// Повторяет выступающий наклонный край прибыльной надставки
-    drawing.box(-p.dimensions[0].diameter * 0.32, -48, p.dimensions[0].diameter * 0.32, -38, paint, MoldPart::rod);	// Показывает верхнюю планку сигнального стержня
     drawFasteners(drawing, upperOuter, bottom[0], fastener, MoldPart::upperFrame);	// Размещает верхний разъем и парные скобы
     drawFasteners(drawing, lowerOuter, bottom[3], fastener, MoldPart::flask, bottomRight);	// Размещает разъем нижней опоки
-    drawing.box(-barrelOuter - 25, top[2] - 30, -barrelOuter + 30, top[2] + 30, hatch, MoldPart::chill);	// Показывает верхний выступ левой половины кокиля
-    drawing.box(barrelOuter - 30, top[2] - 30, barrelOuter + 25, top[2] + 30, hatch, MoldPart::chill);	// Повторяет выступ на правой половине кокиля
+    drawing.box(-barrelOuter - 25, top[2] - 30, -upperOuter + 25, top[2] + 30, hatch, MoldPart::chill);	// Показывает верхний выступ левой половины кокиля
+    drawing.box(upperOuter - 25, top[2] - 30, barrelOuter + 25, top[2] + 30, hatch, MoldPart::chill);	// Повторяет выступ на правой половине кокиля
     drawFasteners(drawing, lowerOuter, floor + base - 45, fastener, MoldPart::flask, bottomRight);	// Показывает крепление нижней опоки у плиты
     const double gateY = floor - p.dimensions[4].height * 0.13;	// Подводит питатель к нижнему концу шейки
     const double turnY = gateY - std::min(130.0, p.dimensions[4].height * 0.3);	// Сохраняет колено внутри нижней опоки
@@ -284,10 +282,20 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         drawing.box(pipe - pipeRadius, joint - 21, pipe + pipeRadius, joint + 21, empty, MoldPart::pipe);	// Соединяет белые полости соседних секций
     }	// Завершает текущий блок обработки
     const double funnelHalf = std::max(280.0, pipeOuter + 60);	// Раскрывает воронку над наружной трубой
-    drawing.shape({{pipe - funnelHalf, funnelTop}, {pipe + funnelHalf, funnelTop}, {pipe + pipeRadius + 45, -80}, {pipe - pipeRadius - 45, -80}}, fastener, MoldPart::funnel);	// Рисует наклонные штрихованные стенки воронки
-    drawing.shape({{pipe - funnelHalf + 35, funnelTop}, {pipe + funnelHalf - 35, funnelTop}, {pipe + pipeRadius, -80}, {pipe - pipeRadius, -80}}, empty, MoldPart::funnel);	// Оставляет внутреннюю поверхность воронки белой
+    drawing.shape({{pipe - funnelHalf, funnelTop}, {pipe + funnelHalf, funnelTop}, {pipe + pipeRadius + 45, -80}, {pipe - pipeRadius - 45, -80}}, refractory, MoldPart::funnel);	// Рисует наклонные штрихованные стенки воронки
+    drawing.shape({{pipe - funnelHalf + 55, funnelTop}, {pipe + funnelHalf - 55, funnelTop}, {pipe + pipeRadius, -80}, {pipe - pipeRadius, -80}}, empty, MoldPart::funnel);	// Оставляет внутреннюю поверхность воронки белой
+    drawing.style(MoldPart::funnel, refractory);	// Сохраняет яркость кладки при выборе детали
+    for (double side : {-1.0, 1.0}) {	// Повторяет кирпичные швы на обеих стенках
+        for (int k = 1; k < 12; ++k) {	// Разбивает наклонную кладку на отдельные кирпичи
+            const double t = k / 12.0;	// Находит положение шва вдоль стенки
+            const double y = funnelTop + (-80 - funnelTop) * t;	// Сохраняет общую высоту концов кирпичного шва
+            const double outside = funnelHalf * (1 - t) + (pipeRadius + 45) * t;	// Находит внешнюю грань наклонной стенки
+            const double inside = (funnelHalf - 55) * (1 - t) + pipeRadius * t;	// Находит внутреннюю грань наклонной стенки
+            drawing.moveTo({pipe + side * inside, y});	// Начинает шов на внутренней стороне кладки
+            drawing.lineTo({pipe + side * outside, y});	// Соединяет грани коротким кирпичным швом
+        }	// Завершает текущий блок обработки
+    }	// Завершает текущий блок обработки
     const double entry = sectionRadius(p, 4, 0.87);	// Соединяет питатель с действующей наклонной стенкой
-    drawing.shape({{pipe - 170, turnY - gateRadius - 12}, {entry, gateY - gateRadius - 12}, {entry, gateY + gateRadius + 12}, {pipe - 150, turnY + gateRadius + 12}}, paint, MoldPart::gate);	// Обводит наклонный питатель тонкой темной оболочкой
     drawing.shape({{pipe - 170, turnY - gateRadius}, {entry - 5, gateY - gateRadius}, {entry - 5, gateY + gateRadius}, {pipe - 150, turnY + gateRadius}}, empty, MoldPart::gate);	// Открывает наклонный канал к нижней шейке
     const auto elbow = [&]() {	// Задает плавное колено литникового пути
         BeginPath(dc); drawing.moveTo({pipe - pipeRadius, turnY - 70});	// Начинает внутреннюю стенку колена
@@ -355,7 +363,6 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         for (const auto point : sectionContour(p, i, top[i], bottom[i])) { points.push_back(drawing.pixel(point)); }	// Повторяет исходную границу без изменения карты
         Polygon(dc, points.data(), static_cast<int>(points.size()));	// Обводит участок после фазовой окраски
     }	// Завершает текущий блок обработки
-    drawing.box(-8, 0, 8, bottom[1] + p.dimensions[2].height * 0.2, paint, MoldPart::rod);	// Показывает условный сигнальный стержень
     SetBkMode(dc, TRANSPARENT); SetTextAlign(dc, TA_CENTER | TA_TOP);	// Подготавливает постоянную нумерацию отделений
     SetTextColor(dc, RGB(0, 0, 0));	// Выбирает читаемый цвет цифровых обозначений
     for (std::size_t i = 0; i < sectionCount; ++i) {	// Размещает номера внутри соответствующих полостей
@@ -364,6 +371,6 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         TextOutW(dc, position.x, position.y - 7, number, 1);	// Сохраняет номер видимым без наведения мыши
     }	// Завершает текущий блок обработки
     static_cast<void>(cursor); RestoreDC(dc, saved);	// Возвращает контекст вызывающему окну
-    for (const auto brush : {colors[0], colors[1], colors[2], muted, hatch, dots, paint, fastener, bricks}) { DeleteObject(brush); }	// Освобождает созданные кисти текущего кадра
+    for (const auto brush : {colors[0], colors[1], colors[2], muted, hatch, dots, paint, fastener, bricks, refractory}) { DeleteObject(brush); }	// Освобождает созданные кисти текущего кадра
     DeleteObject(outline); DeleteObject(mutedOutline);	// Освобождает контурные перья
 }	// Завершает текущий блок обработки

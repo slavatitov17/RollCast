@@ -7,7 +7,7 @@
 #include "project.h"	// Подключает общие размеры пяти отделений
 enum class MoldPart {	// Перечисляет зоны разреза с подсказками
     none, profit,	// Обозначает свободное пространство вокруг формы
-    riser, upperModel, funnel, pipe, upperFrame, rod,	// Перечисляет верхние элементы формы и сифона
+    riser, upperModel, funnel, pipe, upperFrame,	// Перечисляет верхние элементы формы и сифона
     plug, chill, barrel, lowerModelMiddle, middleFrame,	// Перечисляет элементы вокруг бочки
     lowerModelBottom, flask, plate, gate, elbow	// Перечисляет нижние элементы литниковой системы
 };	// Завершает объявление структуры или набора данных
