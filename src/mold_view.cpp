@@ -156,15 +156,24 @@ std::vector<Location> sectionContour(const Project& p, std::size_t i, double top
     }	// Завершает текущий блок обработки
     return points;	// Передает готовый контур для GDI
 }	// Завершает текущий блок обработки
-void drawFasteners(const Drawing& drawing, double radius, double height, HBRUSH brush, MoldPart part, double rightRadius = -1) {	// Рисует парные скобы опоки
-    for (double side : {-1.0, 1.0}) {	// Повторяет форму скобы с противоположной стороны
-        const double wall = side > 0 && rightRadius >= 0 ? rightRadius : radius;	// Учитывает расширенную правую стенку нижней опоки
-        const double inner = side * (wall - 22);	// Находит точку захвата у стенки
-        const double outer = side * (wall + 72);	// Задает внешний край скобы
-        const double lip = side * (wall + 37);	// Задает внутренний уступ скобы
-        drawing.shape({{inner, height - 80}, {outer, height - 80}, {outer, height + 80},	// Задает внешний контур скобы
-                       {inner, height + 80}, {inner, height + 39}, {lip, height + 39},	// Формирует нижний захват скобы
-                       {lip, height - 39}, {inner, height - 39}}, brush, part);	// Формирует верхний захват скобы
+void drawFasteners(const Drawing& drawing, double radius, double height, HBRUSH metal, HBRUSH bracket, MoldPart part, double rightRadius = -1, bool foot = false) {	// Собирает скобу и выступы единого разъема
+    for (double side : {-1.0, 1.0}) {	// Зеркально повторяет узел на обеих сторонах
+        const double wall = side > 0 && rightRadius >= 0 ? rightRadius : radius;	// Использует действующую наружную стенку нужной стороны
+        const auto local = [&](std::initializer_list<Location> contour, HBRUSH fill) {	// Привязывает все детали к одной поверхности
+            std::vector<Location> points;	// Подготавливает зеркальный контур крепления
+            for (const auto point : contour) { points.push_back({side * (wall + point.x), height + point.y}); }	// Применяет общую опорную точку стенки
+            drawing.shape(points, fill, part);	// Регистрирует скобу вместе с соответствующей опокой
+        };	// Завершает объявление преобразования координат узла
+        if (foot) {	// Устанавливает нижнюю лапу непосредственно на плиту
+            local({{-10, -100}, {72, -100}, {82, -90}, {82, 0}, {-10, 0}, {-10, -28}, {48, -28}, {48, -64}, {-10, -64}}, bracket);	// Рисует опорную скобу без зазора снизу
+            local({{-55, -74}, {0, -74}, {32, -56}, {48, -48}, {48, -28}, {-55, -28}}, metal);	// Соединяет нижний выступ со скобой
+        } else {	// Соединяет две половины разъемной опоки
+            local({{-10, -82}, {72, -82}, {82, -72}, {82, 72}, {72, 82}, {-10, 82}, {-10, 48}, {44, 48}, {48, 44}, {48, -44}, {44, -48}, {-10, -48}}, bracket);	// Повторяет скобу со смягченными наружными углами
+            local({{-55, -54}, {0, -54}, {32, -26}, {48, -12}, {48, 12}, {32, 26}, {0, 54}, {-55, 54}}, metal);	// Заводит выступы стенки внутрь охватывающей скобы
+            drawing.style(part, metal);	// Выбирает общий контур двух половин разъема
+            drawing.moveTo({side * (wall - 55), height});	// Начинает разделитель внутри металлической стенки
+            drawing.lineTo({side * (wall + 48), height});	// Доводит линию разъема до захвата скобы
+        }	// Завершает выбор типа крепежного узла
     }	// Завершает текущий блок обработки
 }	// Завершает текущий блок обработки
 const wchar_t* partName(MoldPart part) {	// Сопоставляет элементу подпись исходной схемы
@@ -236,6 +245,7 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
     const HBRUSH dots = createStipple(dc);	// Обозначает формовочную смесь точечным узором
     const HBRUSH paint = CreateSolidBrush(RGB(40, 40, 40));	// Показывает тонкий противопригарный слой темным
     const HBRUSH fastener = CreateHatchBrush(HS_FDIAGONAL, RGB(0, 0, 0));	// Меняет направление штрихов на креплениях
+    const HBRUSH clamp = CreateSolidBrush(RGB(205, 205, 205));	// Отличает литую скобу от штрихованных выступов
     const HBRUSH refractory = CreateSolidBrush(RGB(255, 255, 255));	// Отделяет кладку воронки от полости заливки
     const HBRUSH bricks = createBricks(dc);	// Обозначает плиту кирпичным узором образца
     const auto empty = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));	// Оставляет полости белыми до начала заливки
@@ -263,13 +273,14 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         drawing.shape(sectionContour(p, i, top[i], bottom[i]), empty, metalParts[i]);	// Рисует сужения и скругления полости отливки
     }	// Завершает текущий блок обработки
     drawing.box(minX, floor + base, maxX, floor + base + 40, bricks, MoldPart::plate);	// Рисует широкую плиту с кирпичными швами
-    drawing.box(-lowerOuter - 35, floor + base - 25, bottomRight + 15, floor + base, hatch, MoldPart::flask);	// Показывает подошву нижней опоки над плитой
-    drawing.shape({{-upperOuter - 165, 0}, {-upperOuter - 165, -85}, {upperOuter + 25, -45}, {upperOuter + 25, 0}, {upperOuter - p.flask, 0}, {upperOuter - p.flask, -25}, {-upperOuter + p.flask, -25}, {-upperOuter + p.flask, 0}}, fastener, MoldPart::riser);	// Повторяет выступающий наклонный край прибыльной надставки
-    drawFasteners(drawing, upperOuter, bottom[0], fastener, MoldPart::upperFrame);	// Размещает верхний разъем и парные скобы
-    drawFasteners(drawing, lowerOuter, bottom[3], fastener, MoldPart::flask, bottomRight);	// Размещает разъем нижней опоки
+    drawing.box(-lowerOuter - 82, floor + base - 50, bottomRight + 82, floor + base, hatch, MoldPart::flask);	// Показывает подошву нижней опоки над плитой
+    drawing.shape({{-upperOuter - 165, 0}, {-upperOuter - 165, -85}, {-sectionRadius(p, 0, 0), -35}, {-sectionRadius(p, 0, 0), 0}}, refractory, MoldPart::riser);	// Оставляет выступающую левую планку белой как образец
+    drawing.box(upperOuter - std::max(45.0, p.flask), -65, upperOuter + 25, 0, hatch, MoldPart::riser);	// Соединяет правый верхний фланец со стенкой
+    drawFasteners(drawing, upperOuter, bottom[0], hatch, clamp, MoldPart::upperFrame);	// Размещает верхний разъем и парные скобы
+    drawFasteners(drawing, lowerOuter, bottom[3], hatch, clamp, MoldPart::flask, bottomRight);	// Размещает разъем нижней опоки
     drawing.box(-barrelOuter - 25, top[2] - 30, -upperOuter + 25, top[2] + 30, hatch, MoldPart::chill);	// Показывает верхний выступ левой половины кокиля
     drawing.box(upperOuter - 25, top[2] - 30, barrelOuter + 25, top[2] + 30, hatch, MoldPart::chill);	// Повторяет выступ на правой половине кокиля
-    drawFasteners(drawing, lowerOuter, floor + base - 45, fastener, MoldPart::flask, bottomRight);	// Показывает крепление нижней опоки у плиты
+    drawFasteners(drawing, lowerOuter, floor + base, hatch, clamp, MoldPart::flask, bottomRight, true);	// Показывает крепление нижней опоки у плиты
     const double gateY = floor - p.dimensions[4].height * 0.13;	// Подводит питатель к нижнему концу шейки
     const double turnY = gateY - std::min(130.0, p.dimensions[4].height * 0.3);	// Сохраняет колено внутри нижней опоки
     const double gateRadius = std::min(30.0, p.pipeDiameter / 3);	// Ограничивает ширину питателя размерами стояка
@@ -371,6 +382,6 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         TextOutW(dc, position.x, position.y - 7, number, 1);	// Сохраняет номер видимым без наведения мыши
     }	// Завершает текущий блок обработки
     static_cast<void>(cursor); RestoreDC(dc, saved);	// Возвращает контекст вызывающему окну
-    for (const auto brush : {colors[0], colors[1], colors[2], muted, hatch, dots, paint, fastener, bricks, refractory}) { DeleteObject(brush); }	// Освобождает созданные кисти текущего кадра
+    for (const auto brush : {colors[0], colors[1], colors[2], muted, hatch, dots, paint, fastener, bricks, refractory, clamp}) { DeleteObject(brush); }	// Освобождает созданные кисти текущего кадра
     DeleteObject(outline); DeleteObject(mutedOutline);	// Освобождает контурные перья
 }	// Завершает текущий блок обработки
