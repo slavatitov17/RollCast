@@ -131,6 +131,17 @@ void checkLayerMetrics() {	// Проверяет совместное хране
     require(std::abs(layerValue(dimensions,sample,2,LayerMetric::volume,true,0.5)-volume/2)<1e-12, "Filling volume failed");	// Учитывает осевое заполнение при вычислении объема
 }	// Завершает текущий блок обработки
 void checkExplanation() {	// Проверяет наличие раскрываемой пользователю теории
+    for (const auto section : {HelpSection::general, HelpSection::geometry, HelpSection::materials, HelpSection::calculations}) {	// Проверяет доступность четырех независимых разделов
+        const auto page = aboutContent(section);	// Получает материал выбранной вкладки
+        require(!page.empty() && page.size() > 12, "Help section is empty");	// Исключает пустые вкладки вместо перенесенной теории
+        require(page[page.size() - 11].text == L"Список источников", "Help bibliography missing");	// Требует общую нумерованную библиографию каждой вкладки
+        require(page.back().text.starts_with(L"10. "), "Bibliography numbering differs");	// Сохраняет десять предоставленных источников
+        if (section == HelpSection::geometry || section == HelpSection::materials) {	// Отделяет новые объяснения от прежних формул
+            for (const auto& block : page) { require(block.kind != HelpKind::formula && block.kind != HelpKind::code, "Formulas moved into new sections"); }	// Не переносит формулы и код из расчетов
+        }	// Завершает проверку состава нового раздела
+    }	// Завершает обход четырех вкладок
+    require(std::wstring(sectionNames[0]) == L"Верхняя шейка, верхняя часть (1)", "Upper section label mismatch");	// Проверяет новое имя первого участка
+    require(std::wstring(sectionNames[1]) == L"Верхняя шейка, нижняя часть (2)", "Lower section label mismatch");	// Проверяет новое имя второго участка
     const auto theory = aboutContent(true);	// Получает раздел расчётов без интерфейса Windows
     require(!theory.empty() && theory.front().text == L"Ограничения", "Theory must start with limitations");	// Делает допущения первым разделом справки
     int formulas = 0, snippets = 0;	// Считает математические и программные объяснения

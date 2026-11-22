@@ -225,7 +225,7 @@ void createControls(HWND window, AppState& state) {	// Создает компа
     control(window, L"STATIC", L"Участок", 0, 0, 0, 160, 22, 208);	// Настраивает отображение текущего элемента
     const HWND picker = control(window, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0, 0, 250, 180, chartPicker);	// Предлагает только одно отделение за раз
     for (const auto* name : areaNumbers) { SendMessageW(picker, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name)); }	// Настраивает отображение текущего элемента
-    SendMessageW(picker, CB_SETCURSEL, 0, 0);	// Выбирает прибыль по умолчанию
+    SendMessageW(picker, CB_SETCURSEL, 0, 0);	// Выбирает верхнюю часть верхней шейки
     control(window, L"BUTTON", L"Выгрузить", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 105, 28, firstExport);	// Возвращает стандартную текстовую кнопку выгрузки
     control(window, L"STATIC", L"", 0, 0, 0, 80, 22, 209);	// Показывает правую границу только числового горизонта
     control(window, L"BUTTON", L"-", BS_PUSHBUTTON | WS_TABSTOP, 0, 0, 25, 25, 301);	// Уменьшает масштаб вертикальной оси

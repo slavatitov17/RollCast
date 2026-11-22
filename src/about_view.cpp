@@ -53,13 +53,14 @@ std::string rtfEscape(const std::wstring& text) {	// Преобразует ру
     }	// Завершает текущий блок обработки
     return value;	// Возвращает безопасный текст RTF
 }	// Завершает текущий блок обработки
-std::string document(bool calculations, int width) {	// Настраивает отображение текущего элемента
-    std::string rtf = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}{\\f1 Cambria Math;}{\\f2 Consolas;}}{\\colortbl;\\red25\\green42\\blue55;\\red0\\green0\\blue0;\\red243\\green246\\blue248;}\\viewkind4\\uc1 ";	// Настраивает шрифты и сдержанные цвета
+std::string document(HelpSection section, int width) {	// Настраивает отображение текущего элемента
+    std::string rtf = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Times New Roman;}{\\f1 Cambria Math;}{\\f2 Consolas;}}{\\colortbl;\\red25\\green42\\blue55;\\red0\\green0\\blue0;\\red243\\green246\\blue248;}\\viewkind4\\uc1 ";	// Настраивает шрифты и сдержанные цвета
     int equation = 0;	// Нумерует формулы последовательно внутри расчетной вкладки
-    for (const auto& block : aboutContent(calculations)) {	// Выводит материал в заданном порядке
+    for (const auto& block : aboutContent(section)) {	// Выводит материал в заданном порядке
         const auto text = rtfEscape(block.text);	// Преобразует содержание выбранного блока
         switch (block.kind) {	// Выбирает оформление по роли текста
         case HelpKind::heading: rtf += "\\pard\\ql\\sb260\\sa120\\f0\\fs30\\b\\cf2 " + text + "\\b0\\par "; break;	// Выделяет заголовки разделов и подразделов
+        case HelpKind::subheading: rtf += "\\pard\\ql\\sb260\\sa120\\f0\\fs26\\b\\cf2 " + text + "\\b0\\par "; break;	// Различает подзаголовки уменьшенным размером текста
         case HelpKind::paragraph: rtf += "\\pard\\ql\\sb20\\sa150\\sl300\\slmult1\\f0\\fs23\\cf1 " + text + "\\par "; break;	// Обеспечивает читаемый основной русский текст
         case HelpKind::formula: rtf += "\\pard\\qc\\sb170\\sa200 " + formulaRtf(block.text, ++equation, width) + "\\par "; break;	// Рисует вертикальные дроби вместо косых черт
         case HelpKind::code: rtf += "\\pard\\ql\\sb100\\sa40\\f0\\fs21\\cf2 " + rtfEscape(L"Файл: " + block.source) + "\\par "; rtf += "\\pard\\ql\\li180\\ri100\\sb90\\sa180\\tx720\\tx1440\\f2\\fs19\\highlight3\\cf1 " + text + "\\highlight0\\par "; break;	// Настраивает отображение текущего элемента
@@ -75,7 +76,7 @@ DWORD CALLBACK readStream(DWORD_PTR cookie, LPBYTE buffer, LONG length, LONG* re
 }	// Завершает текущий блок обработки
 void loadDocument(AboutState& state) {	// Показывает выбранную вкладку начиная с ее заголовка
     RECT bounds{}; GetClientRect(state.document, &bounds);	// Подбирает ширину формул под размер окна
-    const auto rtf = document(TabCtrl_GetCurSel(state.tabs) == 1, std::max(300L, bounds.right - 55));	// Настраивает отображение текущего элемента
+    const auto rtf = document(static_cast<HelpSection>(TabCtrl_GetCurSel(state.tabs)), std::max(300L, bounds.right - 55));	// Настраивает отображение текущего элемента
     Stream input{rtf}; EDITSTREAM stream{};	// Подготавливает синхронный поток форматированного текста
     stream.dwCookie = reinterpret_cast<DWORD_PTR>(&input); stream.pfnCallback = readStream;	// Связывает RichEdit с локальным источником
     SendMessageW(state.document, WM_SETREDRAW, FALSE, 0);	// Предотвращает мерцание при замене вкладки
@@ -101,7 +102,7 @@ LRESULT CALLBACK aboutProcedure(HWND window, UINT message, WPARAM wParam, LPARAM
         switch (message) {	// Разбирает действия справочного окна
         case WM_CREATE: {	// Создает вкладки и форматированный документ
             state->tabs = CreateWindowExW(0, WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(1), nullptr, nullptr);	// Создает переключатель разделов справки
-            for (const auto* title : {L"Общее", L"Расчеты"}) { TCITEMW item{}; item.mask = TCIF_TEXT; item.pszText = const_cast<wchar_t*>(title); TabCtrl_InsertItem(state->tabs, TabCtrl_GetItemCount(state->tabs), &item); }	// Добавляет обе требуемые вкладки
+            for (const auto* title : {L"Общее", L"Геометрия", L"Материалы", L"Расчеты"}) { TCITEMW item{}; item.mask = TCIF_TEXT; item.pszText = const_cast<wchar_t*>(title); TabCtrl_InsertItem(state->tabs, TabCtrl_GetItemCount(state->tabs), &item); }	// Добавляет четыре требуемые вкладки справки
             state->document = CreateWindowExW(WS_EX_CLIENTEDGE, L"RICHEDIT50W", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 0, 0, 0, 0, window, reinterpret_cast<HMENU>(3), nullptr, nullptr);	// Разрешает чтение выделение и вертикальную прокрутку
             if (!state->tabs || !state->document) { return -1; }	// Отказывается от неполностью созданной справки
             auto* storage = new PictureStorage;	// Подготавливает хранилище векторных изображений

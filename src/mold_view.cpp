@@ -42,7 +42,7 @@ struct Drawing {	// Преобразует точки чертежа в коор
     HDC device;	// Принимает контекст отрисовки окна
     double scale;	// Определяет единый масштаб по обеим осям
     double originX;	// Задает экранную координату оси валка
-    double originY;	// Задает экранную координату верха прибыли
+    double originY;	// Задает экранную координату верха верхней шейки
     const RECT& viewport;	// Ограничивает подпись рамкой чертежа
     MoldHitMap& hits;	// Принимает карту экранных областей формы
     MoldPart hovered;	// Хранит текущий элемент под курсором
@@ -131,7 +131,7 @@ HBRUSH createBricks(HDC device) {	// Создает черно белый кир
 double sectionRadius(const Project& p, std::size_t i, double t) {	// Определяет контур схемы по текущей геометрии
     const auto radius = [&](std::size_t k) { return p.dimensions[k].diameter / 2.0; };	// Читает номинальные диаметры пяти расчетных цилиндров
     const double local = radius(i);	// Сохраняет номинальный радиус выбранного участка
-    if (i <= 1) {	// Соединяет прибыль с верхней шейкой
+    if (i <= 1) {	// Соединяет две части верхней шейки
         const double neck = local * 0.84;	// Сохраняет вертикальные стенки прибыли и верхней шейки
         const double blend = i == 1 ? std::clamp((t - 0.78) / 0.22, 0.0, 1.0) : 0;	// Выделяет скругленный переход к бочке
         return neck + (radius(2) - neck) * blend * blend;	// Раскрывает заделку к верхнему торцу бочки
@@ -178,13 +178,13 @@ void drawFasteners(const Drawing& drawing, double radius, double height, HBRUSH 
 }	// Завершает текущий блок обработки
 const wchar_t* partName(MoldPart part) {	// Сопоставляет элементу подпись исходной схемы
     switch (part) {	// Выбирает название видимой области
-        case MoldPart::profit: return L"Прибыль (1)";	// Называет металл выше границы верхней шейки
-        case MoldPart::riser: return L"Прибыльная надставка";	// Называет верхнюю надставку
-        case MoldPart::upperModel: return L"Верхняя шейка (2)";	// Называет модель верхней шейки
+        case MoldPart::profit: return L"Верхняя шейка, верхняя часть (1)";	// Называет металл верхней части верхней шейки
+        case MoldPart::riser: return L"Верхняя надставка";	// Называет верхнюю надставку
+        case MoldPart::upperModel: return L"Верхняя шейка, нижняя часть (2)";	// Называет модель верхней шейки
         case MoldPart::funnel: return L"Воронка";	// Называет вход литниковой системы
         case MoldPart::pipe: return L"Литниковая труба";	// Называет вертикальную литниковую трубу
         case MoldPart::upperFrame: return L"Верхняя рамка";	// Называет рамку над кокилем
-        case MoldPart::plug: return L"Верхняя шейка (2)";	// Называет нижнюю зону модели верхней шейки
+        case MoldPart::plug: return L"Верхняя шейка, нижняя часть (2)";	// Называет нижнюю зону модели верхней шейки
         case MoldPart::chill: return L"Кокиль";	// Называет обе боковые стенки бочки
         case MoldPart::barrel: return L"Бочка (3)";	// Называет центральную часть валка
         case MoldPart::lowerModelMiddle: return L"Нижняя шейка, верхняя часть (4)";	// Называет верхнюю часть нижней модели
