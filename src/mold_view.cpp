@@ -274,12 +274,13 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
     }	// Завершает текущий блок обработки
     drawing.box(minX, floor + base, maxX, floor + base + 40, bricks, MoldPart::plate);	// Рисует широкую плиту с кирпичными швами
     drawing.box(-lowerOuter - 82, floor + base - 50, bottomRight + 82, floor + base, hatch, MoldPart::flask);	// Показывает подошву нижней опоки над плитой
-    drawing.shape({{-upperOuter - 165, 0}, {-upperOuter - 165, -85}, {-sectionRadius(p, 0, 0), -35}, {-sectionRadius(p, 0, 0), 0}}, refractory, MoldPart::riser);	// Оставляет выступающую левую планку белой как образец
-    drawing.box(upperOuter - std::max(45.0, p.flask), -65, upperOuter + 25, 0, hatch, MoldPart::riser);	// Соединяет правый верхний фланец со стенкой
+    drawing.shape({{-upperOuter - 165, 0}, {-sectionRadius(p, 0, 0), 0}, {-sectionRadius(p, 0, 0), 45}, {-upperOuter - 165, 85}}, refractory, MoldPart::riser);	// Оставляет выступающую левую планку белой как образец
     drawFasteners(drawing, upperOuter, bottom[0], hatch, clamp, MoldPart::upperFrame);	// Размещает верхний разъем и парные скобы
     drawFasteners(drawing, lowerOuter, bottom[3], hatch, clamp, MoldPart::flask, bottomRight);	// Размещает разъем нижней опоки
     drawing.box(-barrelOuter - 25, top[2] - 30, -upperOuter + 25, top[2] + 30, hatch, MoldPart::chill);	// Показывает верхний выступ левой половины кокиля
     drawing.box(upperOuter - 25, top[2] - 30, barrelOuter + 25, top[2] + 30, hatch, MoldPart::chill);	// Повторяет выступ на правой половине кокиля
+    drawing.box(-barrelOuter - 25, bottom[2] - 30, -lowerOuter + 25, bottom[2] + 30, hatch, MoldPart::chill);	// Добавляет нижний левый выступ кокиля
+    drawing.box(lowerOuter - 25, bottom[2] - 30, barrelOuter + 25, bottom[2] + 30, hatch, MoldPart::chill);	// Зеркально повторяет нижний выступ справа
     drawFasteners(drawing, lowerOuter, floor + base, hatch, clamp, MoldPart::flask, bottomRight, true);	// Показывает крепление нижней опоки у плиты
     const double gateY = floor - p.dimensions[4].height * 0.13;	// Подводит питатель к нижнему концу шейки
     const double turnY = gateY - std::min(130.0, p.dimensions[4].height * 0.3);	// Сохраняет колено внутри нижней опоки
@@ -307,16 +308,22 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         }	// Завершает текущий блок обработки
     }	// Завершает текущий блок обработки
     const double entry = sectionRadius(p, 4, 0.87);	// Соединяет питатель с действующей наклонной стенкой
-    drawing.shape({{pipe - 170, turnY - gateRadius}, {entry - 5, gateY - gateRadius}, {entry - 5, gateY + gateRadius}, {pipe - 150, turnY + gateRadius}}, empty, MoldPart::gate);	// Открывает наклонный канал к нижней шейке
+    const double joinX = pipe - 150;	// Задает общий вертикальный стык двух каналов
+    const double joinTop = turnY - gateRadius + 15;	// Опускает верхнюю точку стыка питателя
+    const double joinBottom = turnY + gateRadius + 15;	// Сохраняет одинаковую высоту проходного сечения
+    const double upperSlope = (joinTop - gateY + gateRadius) / (joinX - entry + 5);	// Продолжает уклон верхней стенки к колену
+    const double lowerSlope = (joinBottom - gateY - gateRadius) / (joinX - entry + 5);	// Продолжает уклон нижней стенки к колену
+    drawing.shape({{joinX, joinTop}, {entry - 5, gateY - gateRadius}, {entry - 5, gateY + gateRadius}, {joinX, joinBottom}}, empty, MoldPart::gate);	// Соединяет питатель с общей гранью колена
     const auto elbow = [&]() {	// Задает плавное колено литникового пути
         BeginPath(dc); drawing.moveTo({pipe - pipeRadius, turnY - 70});	// Начинает внутреннюю стенку колена
-        drawing.curveTo({pipe - pipeRadius, turnY - 20}, {pipe - 120, turnY - gateRadius}, {pipe - 170, turnY - gateRadius});	// Поворачивает поток к наклонному питателю
-        drawing.lineTo({pipe - 150, turnY + gateRadius});	// Соединяет нижние стенки литниковых каналов
-        drawing.curveTo({pipe - 70, turnY + gateRadius}, {pipe + pipeRadius, turnY}, {pipe + pipeRadius, turnY - 70});	// Возвращает наружную стенку к вертикальной трубе
+        drawing.curveTo({pipe - pipeRadius, turnY - 20}, {joinX + 60, joinTop + upperSlope * 60}, {joinX, joinTop});	// Поворачивает поток к наклонному питателю
+        drawing.lineTo({joinX, joinBottom});	// Соединяет нижние стенки литниковых каналов
+        drawing.curveTo({joinX + 80, joinBottom + lowerSlope * 80}, {pipe + pipeRadius, turnY}, {pipe + pipeRadius, turnY - 70});	// Возвращает наружную стенку к вертикальной трубе
         CloseFigure(dc); EndPath(dc);	// Замыкает внутренний канал колена
     };	// Завершает объявление структуры или набора данных
     drawing.style(MoldPart::elbow, empty); elbow(); StrokeAndFillPath(dc);	// Рисует закругленный поворот внутри нижней опоки
     if (rebuild) { elbow(); const auto region = PathToRegion(dc); hits.addFluid(region, false); hits.add(region, MoldPart::elbow); }	// Регистрирует поворот для подсказки и заливки
+    drawing.box(pipe - pipeOuter - 103, bottom[3] - 54, pipe - pipeOuter, bottom[3] + 54, hatch, MoldPart::flask);	// Повторяет выступ нижнего разъема слева стояка
     const HBRUSH colors[]{CreateSolidBrush(RGB(45, 112, 181)), CreateSolidBrush(RGB(242, 177, 46)), CreateSolidBrush(RGB(228, 76, 57)), muted};	// Согласует цвета трех зон с легендой
     const auto box = [&](double left, double y1, double right, double y2, HBRUSH brush) {	// Закрашивает область без новых областей наведения
         const auto a = drawing.pixel({left, y1}); const auto b = drawing.pixel({right, y2});	// Переводит физические координаты в экранные
@@ -374,6 +381,9 @@ void drawMold(HDC dc, const RECT& area, const Project& p, MoldHitMap& hits, Mold
         for (const auto point : sectionContour(p, i, top[i], bottom[i])) { points.push_back(drawing.pixel(point)); }	// Повторяет исходную границу без изменения карты
         Polygon(dc, points.data(), static_cast<int>(points.size()));	// Обводит участок после фазовой окраски
     }	// Завершает текущий блок обработки
+    drawing.style(MoldPart::flask, hatch);	// Восстанавливает линию разъема поверх всех каналов
+    drawing.moveTo({-lowerOuter - 55, bottom[3]});	// Начинает общий разъем у левого крепления
+    drawing.lineTo({bottomRight + 48, bottom[3]});	// Продолжает линию через стояк до правого захвата
     SetBkMode(dc, TRANSPARENT); SetTextAlign(dc, TA_CENTER | TA_TOP);	// Подготавливает постоянную нумерацию отделений
     SetTextColor(dc, RGB(0, 0, 0));	// Выбирает читаемый цвет цифровых обозначений
     for (std::size_t i = 0; i < sectionCount; ++i) {	// Размещает номера внутри соответствующих полостей
