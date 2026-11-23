@@ -39,23 +39,9 @@ void checkFiles() {	// Проверяет воспроизводимость в�
     require(!legacy.autoTime && legacy.dimensions == p.dimensions && legacy.ironTemperature == p.formTemperature && legacy.paintTemperature == p.formTemperature && legacy.sandTemperature == p.formTemperature, "Legacy v2 interpretation changed");	// Сохраняет числовой горизонт и прежнюю общую температуру
     Run run; run.project = p; run.cooling.calculate(p);	// Выполняет короткий независимый расчёт
     saveProject(path, p, &run); require(loadProject(path) == p, "Summary changed inputs");	// Проверяет чтение при наличии итоговой сводки
-    const auto csv = files.path / L"Полная история.csv"; exportHistory(csv, run);	// Выгружает пять полных временных историй
-    std::ifstream stream(csv, std::ios::binary); std::string line;	// Открывает файл независимо от экспортёра
-    std::getline(stream, line); require(line.starts_with("\xEF\xBB\xBF"), "CSV UTF-8 marker missing");	// Проверяет кодировку русских названий
-    std::size_t rows = 0;	// Считает полные сохранённые отсчёты
-    while (std::getline(stream, line)) {	// Проверяет каждую строку выгрузки
-        std::istringstream source(line); std::vector<std::string> fields; std::string field;	// Подготавливает независимый разбор колонок
-        while (std::getline(source, field, ';')) { fields.push_back(field); }	// Разделяет текстовые и числовые поля
-        require(fields.size() == 9, "CSV field count mismatch");	// Требует все девять объявленных столбцов
-        const auto section = rows / run.cooling.sampleCount();	// Определяет номер выгружаемого отделения
-        const double volume = cylinderVolume(p.dimensions.at(section));	// Находит ожидаемую вместимость цилиндра
-        const double zones = std::stod(fields[4]) + std::stod(fields[5]) + std::stod(fields[6]);	// Суммирует три геометрические зоны
-        const double phases = std::stod(fields[7]) + std::stod(fields[8]);	// Суммирует две интегральные фазы
-        require(std::abs(zones - volume) < 1e-10 && std::abs(phases - volume) < 1e-10, "CSV phase or zone balance failed");	// Проверяет оба разбиения полного объёма
-        require(std::stod(fields[1]) == run.cooling.section(section).samples[rows % run.cooling.sampleCount()].seconds, "CSV time mismatch");	// Сверяет каждый момент полной истории
-        ++rows;	// Учитывает проверенный температурный кадр
-    }	// Завершает текущий блок обработки
-    require(rows == sectionCount * run.cooling.sampleCount(), "One section missing in CSV");	// Требует историю каждого из пяти отделений
+    const auto xlsx = files.path / L"Полная история.xlsx"; exportWorkbook(xlsx, run);	// Выгружает книгу по русскому пути
+    std::ifstream stream(xlsx, std::ios::binary); char signature[2]{}; stream.read(signature, 2);	// Проверяет запись контейнера формата Excel
+    require(signature[0] == 'P' && signature[1] == 'K', "XLSX container missing");	// Исключает переименование текстового CSV в Excel
     require(run.cooling.section(4).samples.back().seconds == 360, "Final partial time step missing");	// Сверяет точную длительность расчёта
     std::ofstream(path, std::ios::trunc) << "RollCast 1\n"; bool rejected = false;	// Создаёт несовместимую схему прежней ветки
     try { loadProject(path); } catch (const std::exception&) { rejected = true; }	// Проверяет неполные входные данные
@@ -66,7 +52,8 @@ void checkFiles() {	// Проверяет воспроизводимость в�
 }	// Завершает текущий блок обработки
 void checkModel() {	// Проверяет влияние реальных полей на модель
     Project p; p.autoTime = false;	// Описывает параметры текущего действия
-    require(totalLength(p) == 3300 && outerDiameter(p) == 1040, "Incorrect monolithic dimensions");	// Описывает параметры текущего действия
+    require(totalLength(p) == 3300 && outerDiameter(p) == 1022, "Incorrect monolithic dimensions");	// Описывает параметры текущего действия
+    require(p.coating == 1 && std::abs(totalVolume(p) - 0.5149227438866351) < 1e-10, "Initial coating or total volume differs");	// Проверяет новое покрытие и общий объем
     require(metalCells(p, 2) == 520, "Diameter step interpreted as radius step");	// Описывает параметры текущего действия
     for (std::size_t i = 0; i < sectionCount; ++i) { p.dimensions[i] = {400, 500 + static_cast<int>(i) * 100}; }	// Сохраняет диаметр при разных осевых размерах
     p.hours = 1; p.diameterStep = 25; p.coating = 20;	// Создаёт быстрый контроль теплообмена

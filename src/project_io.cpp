@@ -43,7 +43,7 @@ Project loadProject(const std::filesystem::path& path) {	// Открывает �
 }	// Завершает текущий блок обработки
 void saveProject(const std::filesystem::path& path, const Project& p, const Run* run) {	// Сохраняет проект и доступную итоговую сводку
     validateProject(p);	// Проверяет данные до создания документа
-    atomicWrite(path, [&](std::ostream& stream) {	// Защищает существующий CSV от ошибок записи
+    atomicWrite(path, [&](std::ostream& stream) {	// Защищает существующий проект от ошибок записи
         stream << "RollCast 3\n";	// Описывает параметры текущего действия
         for (const auto& d : p.dimensions) { stream << d.diameter << ' ' << d.height << '\n'; }	// Сохраняет номера в порядке сверху вниз
         stream << p.chill << ' ' << p.coating << ' ' << p.barrelFlask << ' ' << p.sand << ' ' << p.flask << ' ' << p.pipeDiameter << '\n';	// Записывает толщины и диаметр трубы
@@ -60,21 +60,5 @@ void saveProject(const std::filesystem::path& path, const Project& p, const Run*
                 stream << i + 1 << ' ' << v.solid << ' ' << v.liquid << ' ' << h.completedAt.value_or(-1) << '\n';	// Сохраняет объемы и достигнутое время затвердевания
             }	// Завершает текущий блок обработки
         }	// Завершает текущий блок обработки
-    });	// Завершает защищенную запись CSV
-}	// Завершает текущий блок обработки
-void exportHistory(const std::filesystem::path& path, const Run& run) {	// Сохраняет полную историю всех пяти отделений
-    atomicWrite(path, [&](std::ostream& stream) {	// Защищает существующий CSV от ошибок записи
-        stream << "\xEF\xBB\xBF";	// Обозначает кодировку русских подписей для Excel
-        stream << "Отделение;Время с;Ось град C;Стенка град C;Твердая зона м³;Двухфазная зона м³;Жидкая зона м³;Твердая фаза м³;Жидкая фаза м³\n";	// Указывает смысл и единицы каждого столбца
-        constexpr const char* names[]{"Верхняя шейка, верхняя часть (1)", "Верхняя шейка, нижняя часть (2)", "Бочка (3)", "Нижняя шейка, верх (4)", "Нижняя шейка, низ (5)"};	// Сохраняет соответствие номеров схеме формы
-        for (std::size_t i = 0; i < sectionCount; ++i) {	// Выгружает каждое отделение полностью
-            const double volume = cylinderVolume(run.project.dimensions[i]);	// Получает постоянную вместимость отделения
-            for (const auto& s : run.cooling.section(i).samples) {	// Сохраняет начальный и все последующие кадры
-                const auto v = phaseVolumes(run.project.dimensions[i], s);	// Учитывает фазы внутри двухфазной зоны
-                stream << names[i] << ';' << s.seconds << ';' << s.axisTemperature << ';' << s.surfaceTemperature;	// Записывает время и основные температуры
-                for (const auto& z : s.phase.zones) { stream << ';' << z.volumeShare * volume; }	// Выгружает три непересекающиеся геометрические зоны
-                stream << ';' << v.solid << ';' << v.liquid << '\n';	// Выгружает суммарные объемы двух фаз
-            }	// Завершает текущий блок обработки
-        }	// Завершает текущий блок обработки
-    });	// Завершает защищенную запись CSV
+    });	// Завершает защищенную запись проекта
 }	// Завершает текущий блок обработки

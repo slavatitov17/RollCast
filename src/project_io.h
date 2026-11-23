@@ -7,4 +7,4 @@ struct Run {	// Объединяет входные данные с рассчи
 };	// Завершает объявление структуры или набора данных
 Project loadProject(const std::filesystem::path& path);	// Читает и проверяет проект из файла
 void saveProject(const std::filesystem::path& path, const Project& project, const Run* run = nullptr);	// Сохраняет входы и доступную итоговую сводку
-void exportHistory(const std::filesystem::path& path, const Run& run);	// Экспортирует полные временные истории пяти отделений
+void exportWorkbook(const std::filesystem::path& path, const Run& run);	// Сохраняет параметры объемы толщины и графики Excel

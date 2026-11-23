@@ -154,7 +154,8 @@ void updateDerived(HWND window, AppState& state) {	// Обновляет тол�
         const auto p = readProject(window, state); state.preview = p; state.rebuildMold = true; wchar_t value[80]{};	// Описывает параметры текущего действия
         std::swprintf(value, std::size(value), L"%.6g", outerDiameter(p)); SetDlgItemTextW(window, 210, value);	// Показывает вычисленный наружный диаметр D0
         std::swprintf(value, std::size(value), L"%.6g", totalLength(p)); SetDlgItemTextW(window, 211, value);	// Показывает сумму осевых размеров L0
-    } catch (...) { SetDlgItemTextW(window, 210, L""); SetDlgItemTextW(window, 211, L""); }	// Очищает габариты при незавершенном вводе
+        std::swprintf(value, std::size(value), L"%.4f", totalVolume(p)); SetDlgItemTextW(window, 212, value);	// Показывает суммарный объем металла V0
+    } catch (...) { SetDlgItemTextW(window, 210, L""); SetDlgItemTextW(window, 211, L""); SetDlgItemTextW(window, 212, L""); }	// Очищает габариты при незавершенном вводе
     state.changing = changing;	// Восстанавливает обработку пользовательских изменений
 }	// Завершает текущий блок обработки
 void writeProject(HWND window, AppState& state, const Project& p) {	// Заполняет обе вкладки одним согласованным проектом
@@ -175,7 +176,7 @@ void showTab(AppState& state, int selected) {	// Переключает груп
 }	// Завершает текущий блок обработки
 void createControls(HWND window, AppState& state) {	// Создает компактный редактор и панель действий
     control(window, L"BUTTON", L"Сохранить в .roll", BS_PUSHBUTTON | WS_TABSTOP, 16, 10, 155, 31, 3);	// Ставит сохранение проекта первым действием
-    control(window, L"BUTTON", L"Сохранить в .csv", BS_PUSHBUTTON | WS_TABSTOP, 181, 10, 155, 31, 4);	// Ставит выгрузку истории вторым действием
+    control(window, L"BUTTON", L"Сохранить в .xlsx", BS_PUSHBUTTON | WS_TABSTOP, 181, 10, 155, 31, 4);	// Ставит выгрузку истории вторым действием
     control(window, L"BUTTON", L"Открыть из файла", BS_PUSHBUTTON | WS_TABSTOP, 346, 10, 155, 31, 2);	// Добавляет загрузку входов без автоматического расчета
     control(window, L"BUTTON", L"О программе", BS_PUSHBUTTON | WS_TABSTOP, 0, 10, 130, 31, 6);	// Создает правую кнопку встроенной справки
     control(window, L"BUTTON", L"Рассчитать", BS_PUSHBUTTON | WS_TABSTOP, 28, 0, 336, 34, 1);	// Закрепляет расчет внизу панели параметров
@@ -192,9 +193,9 @@ void createControls(HWND window, AppState& state) {	// Создает компа
         std::swprintf(name, std::size(name), L"L%d", i + 1); groupControl(window, state, 0, L"STATIC", name, 168, y + 4, 25, 20);	// Описывает параметры текущего действия
         groupControl(window, state, 0, L"EDIT", L"", 202, y, 90, 24, firstNumber + i * 2 + 1);	// Описывает параметры текущего действия
     }	// Завершает текущий блок обработки
-    const wchar_t* symbols[]{L"SK", L"SC", L"SOP", L"SFS", L"SOS", L"DS", L"D0", L"L0"};	// Определяет обозначения размеров в заданном порядке
-    const wchar_t* walls[]{L"Кокиль, мм", L"Слой краски, мм", L"Опока, мм", L"Стенка формы, мм", L"Стенка опоки, мм", L"Диаметр стояка, мм", L"Общий диаметр, мм", L"Общая длина, мм"};	// Описывает параметры текущего действия
-    for (int i = 0; i < 8; ++i) {	// Описывает параметры текущего действия
+    const wchar_t* symbols[]{L"SK", L"SC", L"SOP", L"SFS", L"SOS", L"DS", L"D0", L"L0", L"V0"};	// Определяет обозначения размеров в заданном порядке
+    const wchar_t* walls[]{L"Кокиль, мм", L"Слой краски, мм", L"Опока, мм", L"Стенка формы, мм", L"Стенка опоки, мм", L"Диаметр стояка, мм", L"Общий диаметр, мм", L"Общая длина, мм", L"Общий объем, м3"};	// Описывает параметры текущего действия
+    for (int i = 0; i < 9; ++i) {	// Описывает параметры текущего действия
         const int y = 330 + i * 29;	// Описывает параметры текущего действия
         groupControl(window, state, 0, L"STATIC", symbols[i], 28, y + 4, 32, 20);	// Описывает параметры текущего действия
         const HWND field = control(window, L"EDIT", L"", i < 6 ? ES_AUTOHSCROLL | WS_TABSTOP : ES_READONLY, 62, y, 65, 24, i < 6 ? firstNumber + 10 + i : 210 + i - 6);	// Описывает параметры текущего действия
@@ -373,8 +374,8 @@ void action(HWND window, AppState& state, int id) {	// Выполняет ком
         }	// Завершает текущий блок обработки
     }	// Завершает текущий блок обработки
     if (id == 4 && current(window, state)) {	// Сохраняет полную историю пяти отделений
-        const auto path = chooseFile(window, state, L"Таблица CSV\0*.csv\0\0", L"csv", true);	// Предлагает пользовательское название таблицы
-        if (!path.empty()) { exportHistory(path, *state.result); }	// Записывает все рассчитанные кадры
+        const auto path = chooseFile(window, state, L"Книга Excel\0*.xlsx\0\0", L"xlsx", true);	// Предлагает пользовательское название таблицы
+        if (!path.empty()) { exportWorkbook(path, *state.result); }	// Записывает все рассчитанные кадры
     }	// Завершает текущий блок обработки
     if (id == 6) { showAbout(window); }	// Открывает теорию и концепцию поверх рабочего окна
     if (id == 7 && state.started && state.position < timelineEnd) {	// Возобновляет тот же расчет с сохраненного момента

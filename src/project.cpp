@@ -70,3 +70,11 @@ std::array<double, sectionCount> filledSections(const Project& p, double progres
     }	// Завершает текущий блок обработки
     return fractions;	// Возвращает согласованные доли заполнения
 }	// Завершает текущий блок обработки
+double totalVolume(const Project& p) {	// Рассчитывает общий объем металла в кубических метрах
+    double volume = 0;	// Начинает сумму объемов пяти расчетных цилиндров
+    for (const auto& d : p.dimensions) {	// Учитывает все участки сверху вниз
+        const double radius = d.diameter / 2000.0;	// Переводит диаметр миллиметров в радиус метров
+        volume += std::numbers::pi * radius * radius * d.height / 1000.0;	// Умножает площадь сечения на осевую длину
+    }	// Завершает текущий блок обработки
+    return volume;	// Исключает металл в литниковых каналах
+}	// Завершает текущий блок обработки

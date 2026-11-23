@@ -10,7 +10,7 @@ struct Material {	// Хранит постоянные свойства одно
 struct Project {	// Описывает монолитный валок и окружающую форму
     MoldDimensions dimensions = demoDimensions;	// Хранит D1–D5 и осевые размеры L1–L5
     double chill = 220;	// Описывает параметры текущего действия
-    double coating = 10;	// Описывает параметры текущего действия
+    double coating = 1;	// Описывает параметры текущего действия
     double barrelFlask = 30;	// Задает стенку опоки бочки SOP
     double sand = 145;	// Задает стенку песчаной формы SFS
     double flask = 20;	// Задает стенку опоки шеек SOS
@@ -37,3 +37,4 @@ int metalCells(const Project& project, std::size_t section);	// Определя
 double outerDiameter(const Project& project);	// Рассчитывает максимальный внешний диаметр формы
 double totalLength(const Project& project);	// Суммирует пять осевых размеров
 std::array<double, sectionCount> filledSections(const Project& project, double progress);	// Вычисляет наглядное заполнение снизу вверх
+double totalVolume(const Project& project);	// Суммирует объемы пяти участков без литников
