@@ -16,7 +16,7 @@ void fixture(const std::filesystem::path& directory, const char* name, Project p
             if (!first) { expected << ','; } first = false; expected << '[' << sample.seconds;	// Сохраняет физическое время текущего кадра
             for (const auto& z : sample.phase.zones) { expected << ',' << z.volumeShare * cylinderVolume(p.dimensions[i]); }	// Получает объемы напрямую из фазового результата
             for (const auto& z : sample.phase.zones) { expected << ',' << z.thickness * 1000; }	// Независимо переводит толщины метров в миллиметры
-            expected << ']';	// Завершает одну запись исходного результата
+            expected << ',' << sample.phase.hottestTemperature << ',' << sample.axisTemperature << ',' << sample.surfaceTemperature << ']';	// Сохраняет температуры для проверки числового примера документации
         }	// Завершает текущий блок обработки
         expected << "]}";	// Завершает историю одного участка
     }	// Завершает текущий блок обработки

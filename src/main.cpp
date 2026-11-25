@@ -76,6 +76,7 @@ struct AppState {	// Хранит состояние оконного прило
     unsigned layers = 7;	// Хранит независимый выбор трех слоев
     Project preview;	// Хранит проверенную геометрию предварительного просмотра
     std::array<std::vector<HWND>, 3> groups;	// Описывает параметры текущего действия
+    std::vector<RECT> materialLayout;	// Сохраняет исходные позиции полей свойств материалов
     ChartCache curves;	// Кэширует компактные температурные линии
     MoldHitMap hits;	// Хранит области наведения и полости металла
     RECT moldGeometry{};	// Запоминает область построенной геометрии
@@ -193,12 +194,12 @@ void createControls(HWND window, AppState& state) {	// Создает компа
         std::swprintf(name, std::size(name), L"L%d", i + 1); groupControl(window, state, 0, L"STATIC", name, 168, y + 4, 25, 20);	// Описывает параметры текущего действия
         groupControl(window, state, 0, L"EDIT", L"", 202, y, 90, 24, firstNumber + i * 2 + 1);	// Описывает параметры текущего действия
     }	// Завершает текущий блок обработки
-    const wchar_t* symbols[]{L"SK", L"SC", L"SOP", L"SFS", L"SOS", L"DS", L"D0", L"L0", L"V0"};	// Определяет обозначения размеров в заданном порядке
-    const wchar_t* walls[]{L"Кокиль, мм", L"Слой краски, мм", L"Опока, мм", L"Стенка формы, мм", L"Стенка опоки, мм", L"Диаметр стояка, мм", L"Общий диаметр, мм", L"Общая длина, мм", L"Общий объем, м3"};	// Описывает параметры текущего действия
-    for (int i = 0; i < 9; ++i) {	// Описывает параметры текущего действия
+    const wchar_t* symbols[]{L"SK", L"SC", L"SOP", L"SFS", L"SOS", L"D0", L"L0", L"V0"};	// Оставляет действующие размеры тепловой модели
+    const wchar_t* walls[]{L"Кокиль, мм", L"Слой краски, мм", L"Опока, мм", L"Стенка формы, мм", L"Стенка опоки, мм", L"Общий диаметр, мм", L"Общая длина, мм", L"Общий объем, м3"};	// Подписывает редактируемые и производные геометрические показатели
+    for (int i = 0; i < 8; ++i) {	// Создает пять входов и три производных поля
         const int y = 330 + i * 29;	// Описывает параметры текущего действия
         groupControl(window, state, 0, L"STATIC", symbols[i], 28, y + 4, 32, 20);	// Описывает параметры текущего действия
-        const HWND field = control(window, L"EDIT", L"", i < 6 ? ES_AUTOHSCROLL | WS_TABSTOP : ES_READONLY, 62, y, 65, 24, i < 6 ? firstNumber + 10 + i : 210 + i - 6);	// Описывает параметры текущего действия
+        const HWND field = control(window, L"EDIT", L"", i < 5 ? ES_AUTOHSCROLL | WS_TABSTOP : ES_READONLY, 62, y, 65, 24, i < 5 ? firstNumber + 10 + i : 210 + i - 5);	// Сохраняет идентификаторы настоящих входов и вычисленных значений
         state.groups[0].push_back(field);	// Связывает поле с вкладкой геометрии
         groupControl(window, state, 0, L"STATIC", walls[i], 134, y + 4, 166, 22);	// Описывает параметры текущего действия
     }	// Завершает текущий блок обработки
@@ -213,13 +214,19 @@ void createControls(HWND window, AppState& state) {	// Создает компа
     const auto heading = [&](const wchar_t* name) { groupControl(window, state, 1, L"STATIC", name, 28, row, 260, 20); row += 23; };	// Создает название очередного материала
     const auto field = [&](const wchar_t* name, int number) { groupControl(window, state, 1, L"STATIC", name, 28, row + 3, 185, 20); groupControl(window, state, 1, L"EDIT", L"", 215, row, 78, 22, firstNumber + number); row += 23; };	// Связывает подпись с соответствующим параметром
     heading(L"Металл");	// Описывает параметры текущего действия
+    field(L"Плотность, кг/м3", 19); field(L"Т-емкость, Дж/(кг·К)", 20); field(L"Т-провод., Вт/(м·К)", 21);	// Открывает свойства металла для изменения пользователем
     field(L"Теплота кр., Дж/кг", 31); field(L"Т ликвидус, град C", 32); field(L"Т солидус, град C", 33); field(L"Т заливки, град C", 34);	// Описывает параметры текущего действия
     row += 10; heading(L"Краска");	// Описывает параметры текущего действия
-    field(L"Т-провод., Вт/(м·К)", 24); field(L"Т-емкость, Дж/(кг·К)", 23); field(L"Т начальная, град C", 38); field(L"Плотность, кг/м3", 22);	// Описывает параметры текущего действия
+    field(L"Плотность, кг/м3", 22); field(L"Т-емкость, Дж/(кг·К)", 23); field(L"Т-провод., Вт/(м·К)", 24); field(L"Т начальная, град C", 38);	// Согласует порядок свойств покрытия с другими материалами
     row += 10; heading(L"Кокиль и опока");	// Описывает параметры текущего действия
+    field(L"Плотность, кг/м3", 25); field(L"Т-емкость, Дж/(кг·К)", 26); field(L"Т-провод., Вт/(м·К)", 27);	// Открывает свойства металлической оснастки для редактирования
     field(L"Т ликвидус, град C", 41); field(L"Т солидус, град C", 42); field(L"Т начальная, град C", 39); field(L"Т окр. ср., град C", 36); field(L"Теплоотд., Вт/(м2·К)", 37);	// Описывает параметры текущего действия
     row += 10; heading(L"Форма");	// Описывает параметры текущего действия
-    field(L"Т-провод., Вт/(м·К)", 30); field(L"Т-емкость, Дж/(кг·К)", 29); field(L"Т начальная, град C", 40); field(L"Плотность, кг/м3", 28);	// Описывает параметры текущего действия
+    field(L"Плотность, кг/м3", 28); field(L"Т-емкость, Дж/(кг·К)", 29); field(L"Т-провод., Вт/(м·К)", 30); field(L"Т начальная, град C", 40);	// Согласует порядок свойств песчаной формы
+    for (const auto item : state.groups[1]) {	// Запоминает исходную компоновку полной вкладки материалов
+        RECT bounds{}; GetWindowRect(item, &bounds); MapWindowPoints(nullptr, window, reinterpret_cast<POINT*>(&bounds), 2);	// Переводит экранные координаты в координаты рабочего окна
+        state.materialLayout.push_back(bounds);	// Сохраняет независимый образец для последующих изменений размеров
+    }	// Завершает сохранение исходного расположения полей
     control(window, TRACKBAR_CLASSW, L"", TBS_NOTICKS | WS_TABSTOP, 0, 0, 100, 25, sliderId);	// Создает общую круглую временную ручку
     SendDlgItemMessageW(window, sliderId, TBM_SETRANGE, TRUE, MAKELPARAM(0, timelineEnd));	// Сохраняет разрешение общей шкалы
     control(window, L"STATIC", L"00:00:00", 0, 0, 0, 85, 22, clockId);	// Оставляет нулевое время до расчета
@@ -249,6 +256,11 @@ double fillProgress(const AppState& state) {	// Определяет степе�
 }	// Завершает текущий блок обработки
 void arrange(HWND window, AppState& state) {	// Размещает постоянно видимые элементы управления
     const auto areas = layout(window, state.started);	// Описывает параметры текущего действия
+    const double materialScale = std::clamp((areas.client.bottom - 234.0) / 651.0, 0.8, 1.0);	// Умещает свойства над кнопками при минимальной высоте
+    for (std::size_t i = 0; i < state.materialLayout.size(); ++i) {	// Перестраивает материалы относительно сохраненных исходных позиций
+        const auto& bounds = state.materialLayout[i];	// Использует исходник вместо накопления ошибок масштабирования
+        MoveWindow(state.groups[1][i], bounds.left, 134 + static_cast<int>((bounds.top - 134) * materialScale), bounds.right - bounds.left, static_cast<int>((bounds.bottom - bounds.top) * materialScale), TRUE);	// Сохраняет ширину шрифт и доступность всех полей
+    }	// Завершает размещение свойств четырех материалов
     MoveWindow(GetDlgItem(window, 1), 28, areas.client.bottom - 92, 270, 30, TRUE);	// Описывает параметры текущего действия
     MoveWindow(GetDlgItem(window, 7), 28, areas.client.bottom - 56, 270, 30, TRUE);	// Ставит остановку под запуском
     EnableWindow(GetDlgItem(window, 7), state.started && state.position < timelineEnd);	// Разрешает остановку и продолжение до конца истории
@@ -274,7 +286,7 @@ void arrange(HWND window, AppState& state) {	// Размещает постоя�
     MoveWindow(GetDlgItem(window, 303), card.right - 159, card.top + 10, 25, 26, TRUE);	// Ставит увеличение справа от поля
     EnableWindow(GetDlgItem(window, firstExport), state.result && !state.running && !state.edited);	// Запрещает выгрузку отсутствующего или устаревшего результата
     EnableWindow(GetDlgItem(window, sliderId), state.result || state.running);	// Оставляет шкалу неподвижной до команды расчета
-    EnableWindow(GetDlgItem(window, 4), state.result && !state.running && !state.edited);	// Разрешает CSV только для актуальной истории
+    EnableWindow(GetDlgItem(window, 4), state.result && !state.running && !state.edited);	// Разрешает Excel только для актуальной истории
     EnableWindow(GetDlgItem(window, 1), TRUE);	// Позволяет начать новое задание после отмены прежнего
     SetDlgItemTextW(window, 1, state.started ? L"Рассчитать заново" : L"Рассчитать");	// Различает первый запуск и повторное вычисление
 }	// Завершает текущий блок обработки

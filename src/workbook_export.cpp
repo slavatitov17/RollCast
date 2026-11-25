@@ -44,22 +44,22 @@ struct Book {	// Управляет библиотечными ресурсам�
 };	// Завершает объявление структуры или набора данных
 struct Styles {	// Объединяет согласованное оформление всех трех листов
     lxw_format* title;	// Выделяет название листа над таблицей
-    lxw_format* note;	// Переносит короткое объяснение структуры выгрузки
+    lxw_format* elapsed;	// Показывает длительность с накопленными часами и секундами
     lxw_format* header;	// Обозначает серые границы и заголовки столбцов
     lxw_format* text;	// Оформляет подписи параметров и участков
     lxw_format* number;	// Показывает четыре знака после десятичного разделителя
     explicit Styles(lxw_workbook* book) {	// Создает повторно используемые форматы ячеек
-        title = workbook_add_format(book); note = workbook_add_format(book); header = workbook_add_format(book);	// Выделяет форматы заголовков и пояснений
+        title = workbook_add_format(book); elapsed = workbook_add_format(book); header = workbook_add_format(book);	// Выделяет форматы заголовков и длительности
         text = workbook_add_format(book); number = workbook_add_format(book);	// Выделяет форматы текстовых и числовых данных
-        for (auto* format : {title, note, header, text, number}) {	// Настраивает единый читаемый шрифт
+        for (auto* format : {title, elapsed, header, text, number}) {	// Настраивает единый читаемый шрифт
             if (!format) { throw std::runtime_error("Недостаточно памяти для оформления Excel"); }	// Проверяет каждый выделенный формат
             format_set_font_name(format, "Calibri"); format_set_font_size(format, 11);	// Согласует таблицы и параметры листов
             format_set_align(format, LXW_ALIGN_VERTICAL_CENTER);	// Центрирует содержимое по высоте строки
         }	// Завершает текущий блок обработки
         format_set_bold(title); format_set_font_size(title, 16);	// Выделяет заголовок листа размером и насыщенностью
-        format_set_text_wrap(note); format_set_font_color(note, 0x505050);	// Обеспечивает читаемость пояснений без обрезания
+        format_set_num_format(elapsed, "[hh]:mm:ss");	// Сохраняет полный счет часов без суточного сброса
         format_set_bold(header); format_set_bg_color(header, 0xE8EDF2); format_set_text_wrap(header);	// Отделяет заголовки от числовых данных
-        for (auto* format : {header, text, number}) { format_set_border(format, LXW_BORDER_THIN); format_set_border_color(format, 0xCCCCCC); }	// Рисует тонкие серые границы заполненных ячеек
+        for (auto* format : {header, text, number, elapsed}) { format_set_border(format, LXW_BORDER_THIN); format_set_border_color(format, 0xCCCCCC); }	// Рисует тонкие серые границы заполненных ячеек
         format_set_num_format(number, "0.0000");	// Фиксирует требуемую точность отображения всех чисел
     }	// Завершает создание форматов
 };	// Завершает объявление структуры или набора данных
@@ -70,50 +70,50 @@ void number(lxw_worksheet* sheet, lxw_row_t row, lxw_col_t col, double value, lx
     if (!std::isfinite(value)) { throw std::runtime_error("Результат содержит недопустимое число"); }	// Исключает поврежденные числовые данные
     checked(worksheet_write_number(sheet, row, col, std::round(value * 10000) / 10000, format));	// Сохраняет числовую ячейку с четырьмя знаками
 }	// Завершает текущий блок обработки
-void completion(lxw_worksheet* sheet, lxw_row_t row, lxw_col_t col, std::optional<double> seconds, const Styles& style) {	// Отличает недостигнутое событие от нулевого времени
-    if (seconds) { number(sheet, row, col, *seconds, style.number); }	// Сохраняет рассчитанное время затвердевания в секундах
-    else { text(sheet, row, col, "Не достигнуто", style.text); }	// Не подменяет отсутствие события числовым нулем
-}	// Завершает текущий блок обработки
-lxw_worksheet* sheet(lxw_workbook* book, const char* name, const Styles& style, const char* note) {	// Создает лист с заголовком и пояснением
+void completion(lxw_worksheet* page, lxw_row_t row, std::optional<double> seconds, const Styles& style) {	// Размещает длительность события рядом с отдельной таблицей
+    text(page, row, 6, "Время затвердевания, с", style.header);	// Оставляет требуемую подпись над значением длительности
+    if (seconds) { checked(worksheet_write_number(page, row + 1, 6, std::round(*seconds) / 86400, style.elapsed)); }	// Записывает числовое время Excel с секундным округлением
+    else { text(page, row + 1, 6, "Не достигнуто", style.text); }	// Сохраняет отсутствие события вместо нулевого времени
+}	// Завершает размещение времени затвердевания
+lxw_worksheet* sheet(lxw_workbook* book, const char* name, const Styles& style, bool results) {	// Создает лист без поясняющей строки под заголовком
     auto* result = workbook_add_worksheet(book, name);	// Добавляет лист с требуемым русским названием
     if (!result) { throw std::runtime_error("Не удалось создать лист Excel"); }	// Проверяет допустимость имени и выделение памяти
     worksheet_set_default_row(result, 20, LXW_FALSE); worksheet_set_row(result, 0, 28, nullptr);	// Задает читаемые высоты строк документа
-    checked(worksheet_set_column(result, 0, 0, 48, nullptr)); for (lxw_col_t col = 1; col <= 4; ++col) { checked(worksheet_set_column(result, col, col, 18, nullptr)); }	// Вмещает длинные названия участков и значения
-    checked(worksheet_set_column(result, 5, 5, 25, nullptr));	// Оставляет место правому столбцу времени затвердевания
-    checked(worksheet_merge_range(result, 0, 0, 0, 5, name, style.title));	// Выводит название листа над его содержимым
-    worksheet_set_row(result, 1, 34, nullptr); checked(worksheet_merge_range(result, 1, 0, 1, 5, note, style.note));	// Объясняет назначение таблицы без дополнительной вкладки
-    worksheet_freeze_panes(result, 5, 1); worksheet_repeat_rows(result, 4, 4);	// Закрепляет заголовки и названия участков
-    worksheet_set_zoom(result, 90); return result;	// Открывает книгу в удобном исходном масштабе
-}	// Завершает текущий блок обработки
-void parameters(lxw_workbook* book, const Run& run, const Styles& style) {	// Сохраняет полный снимок входов текущего расчета
-    auto* page = sheet(book, "Параметры", style, "Снимок исходных данных завершенного задания. Время затвердевания указано в секундах после заполнения формы.");	// Отделяет результат расчета от редактируемых полей приложения
+    checked(worksheet_set_column(result, 0, 0, 48, nullptr));	// Вмещает полные названия расчетных участков
+    for (lxw_col_t col = 1; col <= 4; ++col) { checked(worksheet_set_column(result, col, col, 18, nullptr)); }	// Сохраняет одинаковую ширину числовых столбцов
+    checked(worksheet_merge_range(result, 0, 0, 0, results ? 4 : 3, name, style.title));	// Размещает только название над областью таблиц
+    if (results) { worksheet_freeze_panes(result, 5, 0); }	// Закрепляет пять строк без закрепления первого столбца
+    worksheet_set_zoom(result, 90); return result;	// Сохраняет исходный масштаб без лишних областей закрепления
+}	// Завершает создание базового листа
+void parameters(lxw_workbook* book, const Run& run, const Styles& style) {	// Сохраняет действующие входы без служебных резервных полей
+    auto* page = sheet(book, "Параметры", style, false);	// Оставляет лист параметров полностью прокручиваемым
     const auto& p = run.project;	// Использует входы именно рассчитанного результата
-    const char* labels[]{"Участок", "Диаметр, мм", "Длина, мм", "Объем, м3", "Слой краски, мм", "Время затвердевания, с"};	// Задает подписи геометрии и правого итогового столбца
-    worksheet_set_row(page, 4, 32, nullptr);	// Вмещает заголовки с единицами измерения
-    for (lxw_col_t col = 0; col < 6; ++col) { text(page, 4, col, labels[col], style.header); }	// Подписывает таблицу пяти расчетных участков
+    const char* labels[]{"Участок", "Диаметр, мм", "Длина, мм", "Объем, м3"};	// Исключает время и покрытие из геометрической сводки
+    worksheet_set_row(page, 3, 32, nullptr);	// Вмещает заголовки с единицами измерения
+    for (lxw_col_t col = 0; col < 4; ++col) { text(page, 3, col, labels[col], style.header); }	// Подписывает первую таблицу параметров
     for (std::size_t i = 0; i < sectionCount; ++i) {	// Сохраняет участки в порядке схемы
-        const auto row = static_cast<lxw_row_t>(5 + i); text(page, row, 0, utf8(sectionNames[i]), style.text);	// Связывает номер с актуальным полным названием
-        number(page, row, 1, p.dimensions[i].diameter, style.number); number(page, row, 2, p.dimensions[i].height, style.number);	// Сохраняет все пять пар D и L
-        number(page, row, 3, cylinderVolume(p.dimensions[i]), style.number); number(page, row, 4, p.coating, style.number);	// Показывает объем участка и действующее покрытие
-        completion(page, row, 5, run.cooling.section(i).completedAt, style);	// Записывает время события данного участка
-    }	// Завершает текущий блок обработки
-    text(page, 10, 0, "Всего в форме", style.header); number(page, 10, 2, totalLength(p), style.number);	// Суммирует осевые размеры пяти участков
-    number(page, 10, 3, totalVolume(p), style.number); completion(page, 10, 5, run.cooling.completedAt(), style);	// Сохраняет V0 и общее время затвердевания
-    const char* inputs[]{"Группа", "Параметр", "Значение", "Единица измерения"};	// Отделяет входные свойства от итоговой сводки
-    worksheet_set_row(page, 13, 32, nullptr);	// Вмещает единицы измерения в заголовке параметров
-    for (lxw_col_t col = 0; col < 4; ++col) { text(page, 13, col, inputs[col], style.header); }	// Подписывает перечень всех параметров проекта
-    lxw_row_t row = 14;	// Начинает последовательную таблицу входных данных
-    const auto input = [&](const char* group, const char* label, double value, const char* unit) {	// Записывает один параметр вместе с единицей
+        const auto row = static_cast<lxw_row_t>(4 + i); text(page, row, 0, utf8(sectionNames[i]), style.text);	// Связывает номер с актуальным полным названием
+        number(page, row, 1, p.dimensions[i].diameter, style.number); number(page, row, 2, p.dimensions[i].height, style.number);	// Сохраняет все пять пар диаметра и длины
+        number(page, row, 3, cylinderVolume(p.dimensions[i]), style.number);	// Показывает постоянный геометрический объем данного участка
+    }	// Завершает геометрическую сводку участков
+    text(page, 9, 0, "Общие значения (D0, L0, V0)", style.header);	// Отличает наружный диаметр сборки от диаметра металла
+    number(page, 9, 1, outerDiameter(p), style.number); number(page, 9, 2, totalLength(p), style.number);	// Показывает общий диаметр и общую осевую длину
+    number(page, 9, 3, totalVolume(p), style.number);	// Суммирует металл пяти участков без литников
+    const char* inputs[]{"Группа", "Параметр", "Значение", "Единица измерения"};	// Отделяет перечень входов от геометрической сводки
+    worksheet_set_row(page, 12, 32, nullptr);	// Вмещает единицы измерения в заголовке параметров
+    for (lxw_col_t col = 0; col < 4; ++col) { text(page, 12, col, inputs[col], style.header); }	// Подписывает полный перечень действующих параметров
+    lxw_row_t row = 13;	// Начинает последовательную таблицу входных данных
+    const auto input = [&](const char* group, const char* label, double value, const char* unit) {	// Записывает параметр с полным названием и единицей
         text(page, row, 0, group, style.text); text(page, row, 1, label, style.text);	// Сохраняет группу и физический смысл значения
         number(page, row, 2, value, style.number); text(page, row++, 3, unit, style.text);	// Сохраняет округленное число в отдельной числовой ячейке
     };	// Завершает вспомогательную запись входного параметра
-    input("Геометрия", "SK", p.chill, "мм"); input("Геометрия", "SC", p.coating, "мм");	// Сохраняет толщины кокиля и покрытия
-    input("Геометрия", "SOP", p.barrelFlask, "мм"); input("Геометрия", "SFS", p.sand, "мм");	// Сохраняет опоку бочки и песчаную стенку
-    input("Геометрия", "SOS", p.flask, "мм"); input("Геометрия", "DS", p.pipeDiameter, "мм");	// Сохраняет наружную опоку и диаметр стояка
-    input("Геометрия", "D0", outerDiameter(p), "мм"); input("Геометрия", "L0", totalLength(p), "мм");	// Сохраняет производные наружный диаметр и длину
-    input("Геометрия", "V0", totalVolume(p), "м3");	// Исключает металл литников из общего объема
+    input("Геометрия", "Кокиль (SK)", p.chill, "мм"); input("Геометрия", "Слой краски (SC)", p.coating, "мм");	// Расшифровывает размеры кокиля и покрытия
+    input("Геометрия", "Опока (SOP)", p.barrelFlask, "мм"); input("Геометрия", "Стенка формы (SFS)", p.sand, "мм");	// Расшифровывает стенки кокильной и песчаной оснастки
+    input("Геометрия", "Стенка опоки (SOS)", p.flask, "мм");	// Исключает нерасчетный диаметр стояка из таблицы входов
+    input("Геометрия", "Общий диаметр (D0)", outerDiameter(p), "мм"); input("Геометрия", "Общая длина (L0)", totalLength(p), "мм");	// Расшифровывает производные габариты основной формы
+    input("Геометрия", "Общий объем (V0)", totalVolume(p), "м3");	// Расшифровывает объем металла без литников
     const char* materials[]{"Металл", "Краска", "Кокиль и опока", "Форма"};	// Сохраняет свойства всех действующих материалов
-    for (std::size_t i = 0; i < p.materials.size(); ++i) {	// Включает также скрытые постоянные компактного интерфейса
+    for (std::size_t i = 0; i < p.materials.size(); ++i) {	// Сохраняет все редактируемые свойства четырех материалов
         input(materials[i], "Плотность", p.materials[i].density, "кг/м3");	// Сохраняет массу единицы объема материала
         input(materials[i], "Теплоемкость", p.materials[i].heatCapacity, "Дж/(кг·К)");	// Сохраняет коэффициент накопления чувствительной энергии
         input(materials[i], "Теплопроводность", p.materials[i].conductivity, "Вт/(м·К)");	// Сохраняет коэффициент кондуктивного переноса теплоты
@@ -124,14 +124,14 @@ void parameters(lxw_workbook* book, const Run& run, const Styles& style) {	// С
     input("Краска", "Т начальная", p.paintTemperature, "град C");	// Сохраняет начальную температуру покрытия
     input("Кокиль и опока", "Т начальная", p.ironTemperature, "град C");	// Сохраняет начальное состояние металлической оснастки
     input("Кокиль и опока", "Т солидус", p.ironSolidus, "град C"); input("Кокиль и опока", "Т ликвидус", p.ironLiquidus, "град C");	// Сохраняет контрольные пороги нагрева оснастки
-    input("Форма", "Т начальная", p.sandTemperature, "град C"); input("Совместимость", "Т формы прежнего формата", p.formTemperature, "град C");	// Сохраняет раздельную и прежнюю начальные температуры
+    input("Форма", "Т начальная", p.sandTemperature, "град C");	// Сохраняет отдельную начальную температуру песчаной формы
     input("Условия", "Т воздуха", p.airTemperature, "град C"); input("Условия", "Наружная теплоотдача", p.externalTransfer, "Вт/(м2·К)");	// Сохраняет внешнее граничное условие теплообмена
     text(page, row, 0, "Условия", style.text); text(page, row, 1, "Общее время", style.text);	// Отличает автоматическое завершение от числового горизонта
     if (p.autoTime) { text(page, row, 2, "Авто", style.text); } else { number(page, row, 2, p.hours * 60, style.number); }	// Сохраняет выбранный пользователем режим времени
-    text(page, row++, 3, "мин", style.text); input("Условия", "Числовой горизонт .roll", p.hours * 60, "мин");	// Сохраняет также резервное значение числового горизонта
+    text(page, row++, 3, "мин", style.text);	// Подписывает единицу заданного общего времени
     input("Условия", "Шаг по времени", p.step, "с"); input("Условия", "Шаг по диаметру", p.diameterStep, "мм");	// Сохраняет параметры пространственной и временной сетки
-    checked(worksheet_set_column(page, 1, 1, 33, nullptr));	// Вмещает полные названия свойств в таблице параметров
-}	// Завершает текущий блок обработки
+    checked(worksheet_set_column(page, 1, 1, 33, nullptr)); checked(worksheet_set_column(page, 3, 3, 24, nullptr));	// Вмещает полные названия параметров и единицы измерения
+}	// Завершает заполнение листа параметров
 std::vector<double> graphTimes(double duration) {	// Выбирает получасовые моменты и последний кадр
     std::vector<double> times;	// Хранит компактную временную сетку графиков
     for (double t = 0; t < duration; t += 1800) { times.push_back(t); }	// Не переносит каждый тридцатисекундный кадр на график
@@ -144,40 +144,40 @@ double graphValue(const CoolingResult& history, const SectionDimensions& dimensi
     const auto& before = *(next - 1); const double weight = (seconds - before.seconds) / (next->seconds - before.seconds);	// Определяет долю промежутка между двумя кадрами
     return layerValue(dimensions, before, zone, metric) * (1 - weight) + layerValue(dimensions, *next, zone, metric) * weight;	// Согласует произвольный временной шаг с получасовой сеткой
 }	// Завершает текущий блок обработки
-void history(lxw_workbook* book, const Run& run, const Styles& style, LayerMetric metric) {	// Записывает полную историю и пять отдельных графиков
+void history(lxw_workbook* book, const Run& run, const Styles& style, LayerMetric metric) {	// Сохраняет пять таблиц с отдельными временами и графиками
     const char* name = metric == LayerMetric::volume ? "Объем, м3" : "Толщина, мм";	// Выбирает требуемое имя листа результатов
-    auto* page = sheet(book, name, style, "Таблица содержит все расчетные кадры. Графики используют точки через 1800 с и последний момент; их данные приведены справа под графиками.");	// Объясняет различие полной и компактной историй
-    const char* labels[]{"Участок", "Время, с", "Твердый слой", "Двухфазный слой", "Жидкий слой", "Время затвердевания, с"};	// Исключает температуры оси и стенки из выгрузки
+    auto* page = sheet(book, name, style, true);	// Закрепляет только первые пять строк листа результатов
+    checked(worksheet_set_column(page, 5, 5, 3, nullptr)); checked(worksheet_set_column(page, 6, 6, 27, nullptr));	// Отделяет время затвердевания пустым столбцом от истории
+    checked(worksheet_set_column(page, 7, 7, 3, nullptr));	// Оставляет пустой столбец перед графиком
+    for (lxw_col_t col = 8; col < 12; ++col) { checked(worksheet_set_column(page, col, col, 18, nullptr)); }	// Вмещает графики и их компактные исходные таблицы
+    const char* labels[]{"Участок", "Время, с", "Твердый слой", "Двухфазный слой", "Жидкий слой"};	// Исключает повторяемое время события из столбцов истории
     const char* unit = metric == LayerMetric::volume ? ", м3" : ", мм";	// Согласует заголовки и физическую размерность значений
-    worksheet_set_row(page, 4, 32, nullptr);	// Вмещает подписи длинных столбцов истории
-    for (lxw_col_t col = 0; col < 6; ++col) { text(page, 4, col, std::string(labels[col]) + (col >= 2 && col <= 4 ? unit : ""), style.header); }	// Отделяет название показателя от единицы запятой
-    lxw_row_t row = 5;	// Начинает полный набор расчетных кадров
-    for (std::size_t i = 0; i < sectionCount; ++i) {	// Сохраняет все пять участков даже при выборе одного
-        const auto label = utf8(sectionNames[i]); const auto& result = run.cooling.section(i);	// Использует актуальное имя и соответствующую историю
+    lxw_row_t block = 3;	// Начинает первый участок над пятой закрепленной строкой
+    for (std::size_t i = 0; i < sectionCount; ++i) {	// Разделяет полные истории пяти участков
+        const auto& result = run.cooling.section(i); const auto label = utf8(sectionNames[i]);	// Сохраняет однозначное соответствие таблицы и участка
         if (result.samples.empty()) { throw std::runtime_error("Нет расчетной истории для экспорта"); }	// Не создает правдоподобную пустую книгу результатов
-        for (const auto& sample : result.samples) {	// Не сокращает полную таблицу до графической сетки
+        checked(worksheet_merge_range(page, block, 0, block, 4, label.c_str(), style.header));	// Выделяет название отдельной таблицы участка
+        worksheet_set_row(page, block, 32, nullptr); worksheet_set_row(page, block + 1, 32, nullptr);	// Вмещает заголовки участка и трех слоев
+        for (lxw_col_t col = 0; col < 5; ++col) { text(page, block + 1, col, std::string(labels[col]) + (col >= 2 ? unit : ""), style.header); }	// Сохраняет единицы полной истории в секундах
+        lxw_row_t row = block + 2;	// Начинает полный набор расчетных кадров участка
+        for (const auto& sample : result.samples) {	// Не сокращает таблицу до получасовой сетки графика
             text(page, row, 0, label, style.text); number(page, row, 1, sample.seconds, style.number);	// Сохраняет участок и время после заполнения формы
             for (unsigned z = 0; z < 3; ++z) { number(page, row, static_cast<lxw_col_t>(2 + z), layerValue(run.project.dimensions[i], sample, z, metric), style.number); }	// Сохраняет три геометрических слоя выбранного показателя
-            completion(page, row++, 5, result.completedAt, style);	// Повторяет итоговое время события в правом столбце
-        }	// Завершает текущий блок обработки
-    }	// Завершает текущий блок обработки
-    checked(worksheet_autofilter(page, 4, 0, row - 1, 5));	// Разрешает фильтрацию полной истории по участкам
-    checked(worksheet_set_column(page, 7, 7, 48, nullptr)); checked(worksheet_set_column(page, 8, 11, 18, nullptr));	// Оставляет место графикам и их исходным данным
-    lxw_row_t dataRow = 92;	// Размещает компактные таблицы ниже пяти графиков
-    for (std::size_t i = 0; i < sectionCount; ++i) {	// Создает отдельную диаграмму каждого расчетного участка
-        const auto& result = run.cooling.section(i); const auto label = utf8(sectionNames[i]);	// Сохраняет однозначное соответствие кривых выбранному участку
+            ++row;	// Переходит к следующему исходному расчетному кадру
+        }	// Завершает полную историю отдельного участка
+        completion(page, block, result.completedAt, style);	// Показывает событие один раз справа от таблицы
         const auto times = graphTimes(result.samples.back().seconds);	// Включает получасовую сетку и точный последний момент
-        checked(worksheet_merge_range(page, dataRow, 7, dataRow, 11, ("Данные графика: " + label).c_str(), style.header)); ++dataRow;	// Делает происхождение кривых доступным для проверки
-        worksheet_set_row(page, dataRow, 32, nullptr);	// Вмещает заголовки компактной таблицы диаграммы
-        text(page, dataRow, 8, "Время, с", style.header);	// Подписывает числовую ось компактной таблицы
+        lxw_row_t dataRow = block + 18;	// Размещает компактные данные ниже собственного графика
+        checked(worksheet_merge_range(page, dataRow, 8, dataRow, 11, ("Данные графика: " + label).c_str(), style.header)); ++dataRow;	// Оставляет происхождение кривых доступным для проверки
+        worksheet_set_row(page, dataRow, 32, nullptr); text(page, dataRow, 8, "Время, мин", style.header);	// Переводит только графическую временную шкалу в минуты
         for (unsigned z = 0; z < 3; ++z) { text(page, dataRow, static_cast<lxw_col_t>(9 + z), std::string(labels[2 + z]) + unit, style.header); }	// Согласует размерность исходных данных графика
         const lxw_row_t first = ++dataRow;	// Запоминает начало диапазона серий диаграммы
-        for (const double t : times) {	// Записывает только разрешенные моменты отображения кривых
-            number(page, dataRow, 8, t, style.number);	// Сохраняет время компактной графической сетки
+        for (const double t : times) {	// Записывает получасовые моменты и точный конец истории
+            number(page, dataRow, 8, t / 60, style.number);	// Сохраняет минуты числовыми ячейками вместо секунд
             for (unsigned z = 0; z < 3; ++z) { number(page, dataRow, static_cast<lxw_col_t>(9 + z), graphValue(result, run.project.dimensions[i], t, z, metric), style.number); }	// Сохраняет интерполированные значения трех геометрических слоев
             ++dataRow;	// Переходит к следующему моменту графика
-        }	// Завершает текущий блок обработки
-        auto* chart = workbook_add_chart(book, LXW_CHART_SCATTER_STRAIGHT);	// Использует настоящую числовую ось времени в секундах
+        }	// Завершает компактную историю диаграммы
+        auto* chart = workbook_add_chart(book, LXW_CHART_SCATTER_STRAIGHT);	// Использует настоящую числовую ось времени в минутах
         if (!chart) { throw std::runtime_error("Не удалось создать диаграмму Excel"); }	// Проверяет выделение памяти объекта графика
         const char* names[]{"Твердый слой", "Двухфазный слой", "Жидкий слой"};	// Подписывает серии без температурных кривых
         const lxw_color_t colors[]{0x2D70B5, 0xF2B12E, 0xE44C39};	// Повторяет цвета фаз из окна программы
@@ -188,13 +188,13 @@ void history(lxw_workbook* book, const Run& run, const Styles& style, LayerMetri
             chart_series_set_values(series, name, first, static_cast<lxw_col_t>(9 + z), dataRow - 1, static_cast<lxw_col_t>(9 + z));	// Привязывает кривую к компактной таблице своего участка
             lxw_chart_line line{}; line.color = colors[z]; line.width = 1.5; chart_series_set_line(series, &line);	// Сохраняет одинаковую толщину и фазовые цвета линий
         }	// Завершает текущий блок обработки
-        chart_title_set_name(chart, label.c_str()); chart_axis_set_name(chart->x_axis, "Время, с"); chart_axis_set_name(chart->y_axis, name);	// Подписывает участок и обе физические оси
-        chart_axis_set_min(chart->x_axis, 0); chart_axis_set_major_unit(chart->x_axis, 1800);	// Показывает деления времени через тридцать минут
-        chart_axis_set_max(chart->x_axis, std::max(1800.0, std::ceil(times.back() / 1800) * 1800));	// Вмещает последний момент при неполном получасовом интервале
+        chart_title_set_name(chart, label.c_str()); chart_axis_set_name(chart->x_axis, "Время, мин"); chart_axis_set_name(chart->y_axis, name);	// Подписывает участок и обе физические оси
+        chart_axis_set_min(chart->x_axis, 0); chart_axis_set_major_unit(chart->x_axis, 30);	// Показывает деления времени через тридцать минут
+        chart_axis_set_max(chart->x_axis, std::max(30.0, std::ceil(times.back() / 1800) * 30));	// Вмещает последний момент при неполном получасовом интервале
         chart_axis_set_min(chart->y_axis, 0); chart_legend_set_position(chart, LXW_CHART_LEGEND_BOTTOM);	// Оставляет положительную шкалу и легенду под графиком
         lxw_chart_options options{}; options.x_scale = 1.4; options.y_scale = 1.2;	// Фиксирует размер графика независимо от числа кадров
-        checked(worksheet_insert_chart_opt(page, static_cast<lxw_row_t>(4 + i * 16), 7, chart, &options));	// Размещает пять графиков вертикально без перекрытия
-        dataRow += 3;	// Разделяет компактные таблицы соседних участков
+        checked(worksheet_insert_chart_opt(page, block, 8, chart, &options));	// Ставит график справа от времени данного участка
+        block = std::max(row, dataRow) + 3;	// Исключает перекрытие соседних таблиц и графических данных
     }	// Завершает текущий блок обработки
 }	// Завершает текущий блок обработки
 }	// Завершает пространство вспомогательных функций экспорта
